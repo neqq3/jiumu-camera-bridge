@@ -23,7 +23,7 @@ cameras:
           input_args: [-rtsp_transport, tcp, -timeout, "10000000", -use_wallclock_as_timestamps, "1"]
           roles: [record]
       output_args:
-        record: preset-record-generic-audio-copy
+        record: ["-f", "segment", "-segment_time", "10", "-segment_format", "mp4", "-reset_timestamps", "1", "-strftime", "1", "-c", "copy", "-copytb", "1", "-bsf:v", "noise=amount=0:drop=eq(pts\\,nopts)"]
     detect:
       width: 640
       height: 480
@@ -41,3 +41,5 @@ cameras:
 只看画面：添加 [Generic Camera](https://www.home-assistant.io/integrations/generic/)，Stream Source 填桥接生成的 RTSP URL，使用 TCP。这里使用本地取流凭据，不使用九目账号。
 
 需要检测与录像：先让 Frigate 获取画面，再安装 [Frigate HA 集成](https://docs.frigate.video/integrations/home-assistant/)，按照该集成文档配置双方共用 MQTT。尚未在本项目测试环境验证 HA 实体创建。
+
+录像参数保留解复用器的时钟精度，并丢弃恢复时偶尔出现的无时间戳视频包；不会重新编码或修改保留的数据包。请同时更新桥接版本和本摄像头的录像参数。中断仍会留下缺帧，不能把跨越中断的片段时长当作连续画面。

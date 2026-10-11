@@ -4,7 +4,7 @@ const {spawn}=require('node:child_process');
 const {CameraSession}=require('./lib/session.cjs');
 const {network,identity}=require('./lib/hlp-crypto.cjs');
 const {isLan}=require('./lib/hlp-client.cjs');
-const {frigateInputArgs,mediaSources}=require('./lib/transcode.cjs');
+const {frigateInputArgs,frigateRecordArgs,mediaSources}=require('./lib/transcode.cjs');
 const {SetupError,setupResponse}=require('./lib/setup-errors.cjs');
 process.umask(0o077);
 const dataDir=process.env.DATA_DIR||'/data';fs.mkdirSync(dataDir,{recursive:true,mode:0o700});fs.chmodSync(dataDir,0o700);
@@ -56,7 +56,7 @@ function exportsFor(host) {
   return state.cameras.map(c=>{
     const url=`rtsp://${user}:${password}@${host}:${rtspPort}/${c.id}`;
     return {id:c.id,name:c.name,rtsp:url,username:state.rtsp.username,password:state.rtsp.password,
-      frigate:`go2rtc:\n  streams:\n    ${c.id}:\n      - ${JSON.stringify(url)}\ncameras:\n  ${c.id}:\n    ffmpeg:\n      inputs:\n        - path: rtsp://127.0.0.1:8554/${c.id}\n          input_args: ${JSON.stringify(frigateInputArgs)}\n          roles: [detect]\n        - path: rtsp://127.0.0.1:8554/${c.id}\n          input_args: ${JSON.stringify(frigateInputArgs)}\n          roles: [record]\n      output_args:\n        record: preset-record-generic-audio-copy\n    detect:\n      width: 640\n      height: 480\n      fps: 5\n    record:\n      enabled: true\n`};
+      frigate:`go2rtc:\n  streams:\n    ${c.id}:\n      - ${JSON.stringify(url)}\ncameras:\n  ${c.id}:\n    ffmpeg:\n      inputs:\n        - path: rtsp://127.0.0.1:8554/${c.id}\n          input_args: ${JSON.stringify(frigateInputArgs)}\n          roles: [detect]\n        - path: rtsp://127.0.0.1:8554/${c.id}\n          input_args: ${JSON.stringify(frigateInputArgs)}\n          roles: [record]\n      output_args:\n        record: ${JSON.stringify(frigateRecordArgs)}\n    detect:\n      width: 640\n      height: 480\n      fps: 5\n    record:\n      enabled: true\n`};
   });
 }
 const api=http.createServer(async(req,res)=>{

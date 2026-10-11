@@ -40,3 +40,12 @@ docker run --rm --network none --cap-drop ALL --cap-add NET_ADMIN \
 ```
 
 `NET_ADMIN` 只用于这次无网络测试容器的回环地址，产品加载项不需要它。不要将测试命令改为 host 网络；启动器会拒绝存在其他网络接口的环境。测试自身 40 秒超时，未挂载生产数据，不连接厂商或摄像头。该测试不表示完成了 HAOS Supervisor 安装。
+
+
+媒体恢复测试需 Linux、FFmpeg 7 和 go2rtc，建议在无网络、未挂载生产数据的临时容器中执行。生命周期检查约 9 秒，完整合成音视频测试约 80 秒；后者保留中断边界片段并实际解码，不只检查恢复后的画面：
+
+```sh
+node --test --test-concurrency=1 scripts/media-encoder-lifecycle.test.cjs scripts/session-media-outage.test.cjs
+```
+
+生命周期测试用 Node 预加载器将编码器替换为模拟进程，仍使用真实的系统管道；不会改变临时目录禁止执行的挂载属性。完整音视频测试使用实际 FFmpeg 和 go2rtc。
