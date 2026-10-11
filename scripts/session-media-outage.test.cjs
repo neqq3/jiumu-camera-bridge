@@ -39,7 +39,7 @@ test('real media pipeline recovers after independent video and audio stalls',{ti
   for(const name of fs.readdirSync(dir).filter(n=>n.endsWith('.mp4'))){
    const file=path.join(dir,name),mtime=fs.statSync(file).mtimeMs-started,start=created.get(name);
    // A file completed after recovery can have STARTED during the outage.
-   // Select by both boundaries; retain diagnostics for crossing segments.
+   // Select by both boundaries; crossing segments are not recovery samples.
    const phase=start>6000&&mtime<17500?'initial':start>31000&&mtime<46500?'video':start>60000&&mtime<77500?'audio':null;
    if(!phase)continue;
    const result=spawnSync('ffprobe',['-v','error','-show_entries','stream=codec_type,start_time,duration:format=duration','-of','json',file],{timeout:3000});assert.equal(result.status,0);
