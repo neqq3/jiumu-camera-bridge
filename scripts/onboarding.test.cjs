@@ -33,7 +33,7 @@ async function setup(t,scenario={devices:[valid]},existing=false){
   const preload=path.join(dir,'preload.cjs'),lib=path.resolve(__dirname,'../jiumu_bridge/lib');
   fs.writeFileSync(preload,`const fs=require('node:fs');const {SetupError}=require(${JSON.stringify(path.join(lib,'setup-errors.cjs'))});
 require(${JSON.stringify(path.join(lib,'onboarding.cjs'))}).onboard=async()=>{const x=JSON.parse(fs.readFileSync(${JSON.stringify(scenarioFile)}));if(x.code)throw new SetupError(x.code);if(x.rawError)throw new Error(x.rawError);return x.devices;};
-require(${JSON.stringify(path.join(lib,'session.cjs'))}).CameraSession=class{constructor(c){this.c=c;}status(){return {id:this.c.id,name:this.c.name,fresh:false,audio_fresh:false,reconnects:0};}stop(){}};`);
+require(${JSON.stringify(path.join(lib,'session.cjs'))}).CameraSession=class{constructor(c){this.c=c;}status(){const x=JSON.parse(fs.readFileSync(${JSON.stringify(scenarioFile)}));return {id:this.c.id,name:this.c.name,fresh:!!x.videoFresh,audio_fresh:!!x.audioFresh,reconnects:0};}stop(){}};`);
   const apiPort=await port(),mediaPort=await port();
   const child=spawn(process.execPath,['--require',preload,path.resolve(__dirname,'../jiumu_bridge/server.cjs')],{env:{...process.env,DATA_DIR:dir,PORT:String(apiPort),MEDIA_PORT:String(mediaPort),LOCAL_ONLY:'0',HA_INGRESS:'0',DISABLE_GO2RTC:'1'},stdio:['ignore','ignore','pipe']});
   let stderr='';child.stderr.on('data',b=>stderr+=b);const ended=once(child,'exit');
@@ -42,8 +42,13 @@ require(${JSON.stringify(path.join(lib,'session.cjs'))}).CameraSession=class{con
   let ready=false;for(let i=0;i<60;i++){if(child.exitCode!==null)throw Error('server_exited');try{ready=(await fetch(base+'mode',{signal:AbortSignal.timeout(300)})).ok;}catch{}if(ready)break;await new Promise(r=>setTimeout(r,50));}assert.ok(ready);
   const token=fs.readFileSync(path.join(dir,'admin-token'),'utf8').trim();
   async function request(route,value){const r=await fetch(base+route,{method:value?'POST':'GET',headers:{Authorization:'Bearer '+token,'Content-Type':'application/json','X-Jiumu-Request':'1'},body:value?JSON.stringify(value):undefined,signal:AbortSignal.timeout(1000)});return {status:r.status,body:await r.json()};}
-  return {dir,request,original,stderr:()=>stderr,login:()=>request('login',{account:'synthetic-account',password:accountPassword})};
+  return {dir,request,original,stderr:()=>stderr,login:()=>request('login',{account:'synthetic-account',password:accountPassword}),health:()=>fetch(`http://127.0.0.1:${mediaPort}/health`,{signal:AbortSignal.timeout(1000)}),setHealth:(v,a)=>fs.writeFileSync(scenarioFile,JSON.stringify({...scenario,videoFresh:v,audioFresh:a}))};
 }
+
+test('media health requires fresh audio as well as video',{timeout:12000},async t=>{
+  const s=await setup(t,{devices:[valid]},true);
+  for(const [video,audio,status] of [[true,false,503],[false,true,503],[true,true,200]]){s.setHealth(video,audio);assert.equal((await s.health()).status,status);}
+});
 
 test('empty login is rejected before invoking cloud onboarding',{timeout:12000},async t=>{
   const s=await setup(t,{rawError:'must not be called'});const r=await s.request('login',{account:' ',password:''});

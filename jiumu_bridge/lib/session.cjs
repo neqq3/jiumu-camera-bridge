@@ -38,13 +38,22 @@ class CameraSession {
     });
     this.client.on('closed',()=>{
       clearInterval(this.watchdog);this.state='reconnecting';this.jpeg=null;
-      for(const res of [...this.videoClients,...this.audioClients])res.destroy();
+      this.closeMedia();
       if(this.running){this.reconnects++;this.retry=setTimeout(()=>this.connect(),3000);}
     });
     this.client.start();
     this.watchdog=setInterval(()=>{
-      if(Date.now()-(this.lastVideo||this.started)>25000)this.client.fail('No fresh video; retrying local connection');
+      const now=Date.now();
+      // Stop both HTTP inputs together as soon as a track becomes stale. Waiting
+      // for the protocol timeout lets an encoder drain old frames as new media.
+      const s=this.status();if(!s.fresh||!s.audio_fresh)this.closeMedia();
+      if(now-(this.lastVideo||this.started)>25000)return this.client.fail('No fresh video; retrying local connection');
+      if(now-(this.lastAudio||this.started)>25000)this.client.fail('No fresh audio; retrying local connection');
     },1000);
+  }
+  closeMedia(){
+    for(const res of [...this.videoClients,...this.audioClients])res.destroy();
+    this.videoClients.clear();this.audioClients.clear();
   }
   broadcast(clients,body) {
     for(const res of clients) {
@@ -60,7 +69,7 @@ class CameraSession {
       last_failure:this.lastFailure||null,protocol:this.client.stats};
   }
   serve(res,kind) {
-    const s=this.status();if(!s.fresh || kind==='audio.wav'&&!s.audio_fresh){res.writeHead(503);res.end('Camera reconnecting');return;}
+    const s=this.status();if(!s.fresh || kind!=='snapshot.jpg'&&!s.audio_fresh){res.writeHead(503);res.end('Camera reconnecting');return;}
     if(kind==='snapshot.jpg'){res.writeHead(200,{'content-type':'image/jpeg','cache-control':'no-store'});res.end(this.jpeg);return;}
     const clients=kind==='audio.wav'?this.audioClients:this.videoClients;
     if(clients.size>=8){res.writeHead(429);res.end('Too many media clients');return;}

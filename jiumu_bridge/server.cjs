@@ -111,7 +111,7 @@ const api=http.createServer(async(req,res)=>{
 });
 api.requestTimeout=40000;api.headersTimeout=15000;api.listen(port,'0.0.0.0');
 const media=http.createServer((req,res)=>{
-  if(req.url==='/health'){const items=[...sessions.values()].map(s=>s.status());return json(res,items.length&&items.every(s=>s.fresh)?200:503,{cameras:items});}
+  if(req.url==='/health'){const items=[...sessions.values()].map(s=>s.status());return json(res,items.length&&items.every(s=>s.fresh&&s.audio_fresh)?200:503,{cameras:items});}
   const m=/^\/cameras\/([a-z0-9_]+)\/(snapshot.jpg|stream.mjpeg|audio.wav)$/.exec(req.url);
   if(!m||!sessions.has(m[1])){res.writeHead(404);res.end();return;}sessions.get(m[1]).serve(res,m[2]);
 });
