@@ -270,14 +270,29 @@ test('malformed frames, invalid JSON and frame flood close the session without w
   assert.equal(s.status().bindingAttempts, 0); assert.equal(s.status().rejected, 5);
 });
 
-test('absolute registration/partial-frame deadlines and session lifetime release sockets', async t => {
-  const s = await run(t, config(t, {deadlineMs: 120, sessionMs: 700})), token = await bootstrap(s);
+test('absolute registration/partial-frame deadlines and authenticated idle timeout release sockets', async t => {
+  const s = await run(t, config(t, {deadlineMs: 120, sessionMs: 700, idleMs:200})), token = await bootstrap(s);
   const slow = await client(t, s); slow.socket.write(Buffer.from([0x78])); await slow.closed;
   const partial = await client(t, s); partial.send(1, registration(token)); await partial.read();
   partial.socket.write(wire(0, {}).subarray(0, 9)); await partial.closed;
   const live = await client(t, s); live.send(1, registration(token)); await live.read();
   await live.closed;
   assert.equal(s.status().bindingAttempts, 0);
+  for(let i=0;i<20&&!s.logs.some(x=>x.event==='target_disconnected'&&x.reason==='idle_timeout');i++)await delay(5);
+  assert.ok(s.logs.some(x=>x.event==='target_disconnected'&&x.reason==='idle_timeout'));
+});
+
+test('authenticated heartbeats survive the old session deadline while each traffic window remains bounded', async t => {
+  const s=await run(t,config(t,{deadlineMs:120,sessionMs:150,idleMs:500})),token=await bootstrap(s);
+  const p=await client(t,s);p.send(1,registration(token));await p.read();
+  for(let round=0;round<2;round++){
+    for(let i=0;i<70;i++){p.send(0,{});assert.equal((await p.read()).event,0);}
+    await delay(180);
+  }
+  p.send(0,{});assert.equal((await p.read()).event,0);
+  assert.equal(s.status().tcpRegistered,1);assert.equal(s.status().targetConnected,true);
+  p.socket.write(Buffer.concat(Array.from({length:130},()=>wire(0,{}))));await p.closed;
+  assert.equal(s.status().rejected,1);assert.equal(s.status().bindingAttempts,0);
 });
 
 test('authenticated reconnect replaces a half-open session; unknown clients cannot evict it', async t => {
@@ -297,7 +312,7 @@ test('authenticated reconnect replaces a half-open session; unknown clients cann
 test('state locks and failed listen cleanup', async t => {
   const c = config(t), s = await run(t, c);
   await assert.rejects(startBindingService(c));
-  assert.ok(fs.existsSync(path.join(c.dataDir, 'binding.lock')));
+  assert.ok(fs.existsSync(path.join(c.dataDir, process.platform==='linux'?'binding.guard':'binding.lock')));
   const failConfig = config(t, {httpPort: s.addresses.http.port});
   await assert.rejects(startBindingService(failConfig));
   assert.equal(fs.existsSync(path.join(failConfig.dataDir, 'binding.lock')), false);

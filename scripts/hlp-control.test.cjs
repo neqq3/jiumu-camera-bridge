@@ -45,3 +45,22 @@ test('individual ACK also advances the cumulative cursor without double counting
  c.receive(b,c.peer);assert.equal(c.outgoing.size,0);assert.equal(c.stats.acks,3);
  c.receive(b,c.peer);assert.equal(c.stats.acks,3);
 });
+test('a live camera can recover a delayed control acknowledgement without an early retry-count disconnect',()=>{
+ const c=fixture();c.autoStream=false;const now=Date.now();c.lastReceive=now;c.pingAt=now;
+ c.fail=reason=>{c.failure=reason;};c.write(0,Buffer.from('test'));
+ const p=c.outgoing.get(0);p.createdAt=now-12000;p.at=now-2000;p.retries=11;
+ c.tick();assert.equal(c.failure,undefined);assert.equal(p.retries,12);
+ c.receive(ack(11,1),c.peer);assert.equal(c.outgoing.size,0);
+});
+test('control retries retain an absolute deadline and peer inactivity still fails promptly',()=>{
+ const c=fixture();c.autoStream=false;const now=Date.now();c.lastReceive=now;c.pingAt=now;
+ c.fail=reason=>{c.failure=reason;};c.write(0,Buffer.from('test'));
+ c.outgoing.get(0).createdAt=now-30001;c.tick();assert.equal(c.failure,'Camera did not acknowledge control command');
+ c.failure=undefined;c.outgoing.get(0).createdAt=now;c.lastReceive=now-15001;c.tick();
+ assert.equal(c.failure,'Camera connection timed out');
+});
+test('a pending command prevents redundant keepalives from accumulating',()=>{
+ const c=fixture();const now=Date.now();c.lastReceive=now;c.pingAt=now;c.keepAliveAt=now-6000;
+ c.write(0,Buffer.from('test'));c.tick();assert.equal(c.outgoing.size,1);
+ c.receive(ack(11,1),c.peer);c.tick();assert.equal(c.outgoing.size,2);
+});

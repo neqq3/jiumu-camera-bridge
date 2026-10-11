@@ -10,6 +10,7 @@ class CameraSession {
   connect() {
     if(!this.running)return;
     this.state='connecting';this.started=Date.now();this.lastVideo=0;this.lastAudio=0;this.jpeg=null;
+    this.sessionStartFrames=this.frames;
     const parser=new MediaParser((type,body)=>{
       if(type===3) {
         if(body.length<4 || body.readUInt16BE(0)!==0xffd8)return;
@@ -28,7 +29,11 @@ class CameraSession {
     this.client.on('connected',peer=>{this.address=peer.address;this.state='authenticating';});
     this.client.on('data',(channel,data)=>{if(channel===1)parser.accept(data);});
     this.client.on('gap',channel=>{if(channel===1)parser.reset();});
-    this.client.on('failure',message=>{this.error=message;});
+    this.client.on('failure',message=>{
+      this.error=message;
+      this.lastFailure={at:new Date().toISOString(),reason:message,session_ms:Date.now()-this.started,
+        video_frames:this.frames-this.sessionStartFrames,protocol:{...this.client.stats},control:this.client.controlStatus()};
+    });
     this.client.on('closed',()=>{
       clearInterval(this.watchdog);this.state='reconnecting';this.jpeg=null;
       for(const res of [...this.videoClients,...this.audioClients])res.destroy();
@@ -49,7 +54,7 @@ class CameraSession {
     const now=Date.now();return {id:this.camera.id,name:this.camera.name,state:this.state,
       fresh:!!this.lastVideo&&now-this.lastVideo<3000,audio_fresh:!!this.lastAudio&&now-this.lastAudio<3000,
       frames:this.frames,audio_frames:this.audioFrames,reconnects:this.reconnects,address:this.address||null,
-      last_frame_age_ms:this.lastVideo?now-this.lastVideo:null,protocol:this.client.stats};
+      last_frame_age_ms:this.lastVideo?now-this.lastVideo:null,last_failure:this.lastFailure||null,protocol:this.client.stats};
   }
   serve(res,kind) {
     const s=this.status();if(!s.fresh || kind==='audio.wav'&&!s.audio_fresh){res.writeHead(503);res.end('Camera reconnecting');return;}

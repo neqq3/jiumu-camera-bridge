@@ -27,7 +27,7 @@ class HlpClient extends EventEmitter {
     this.nonce=crypto.randomInt(10000000,90000000);this.uid=crypto.randomInt(100000000,900000000);
     this.key=sessionKey(this.net.key,this.nonce);this.seq=0;this.recvSeq=0;this.received=new Set();
     this.messageIds=Array(8).fill(0);this.expected=Array(8).fill(0);this.groups=new Map();this.complete=new Map();this.outgoing=new Map();
-    this.stats={packets:0,acks:0,retries:0,invalid:0,messages:0,dropped:0};this.closed=false;
+    this.stats={packets:0,acks:0,retries:0,invalid:0,messages:0,dropped:0};this.closed=false;this.ackTrace=[];
   }
   start() {
     this.socket=dgram.createSocket('udp4');
@@ -60,9 +60,14 @@ class HlpClient extends EventEmitter {
     }
     if(now-this.lastReceive>15000)return this.fail('Camera connection timed out');
     if(now-this.pingAt>3000) {this.send(Buffer.from([0x0b,0,0]));this.pingAt=now;}
-    if(this.autoStream&&now-this.keepAliveAt>5000) {this.cgi('trans_cmd_string.cgi?cmd=2131&command=1&DevActiveTime=10&');this.keepAliveAt=now;}
-    for(const [seq,p] of this.outgoing)if(now-p.at>600) {
-      if(p.retries++>=10)return this.fail('Camera did not acknowledge control command');
+    // Do not queue more keepalive commands behind an unacknowledged command.
+    if(this.autoStream&&!this.outgoing.size&&now-this.keepAliveAt>5000) {this.cgi('trans_cmd_string.cgi?cmd=2131&command=1&DevActiveTime=10&');this.keepAliveAt=now;}
+    for(const [seq,p] of this.outgoing) {
+      // A live camera may acknowledge control after several seconds. Keep a
+      // fixed deadline rather than treating ten short retries as a dead peer.
+      if(now-p.createdAt>=30000)return this.fail('Camera did not acknowledge control command');
+      if(now-p.at<Math.min(600*2**Math.min(p.retries,2),1500))continue;
+      p.retries++;
       p.at=now;this.stats.retries++;this.send(p.buffer);
     }
     for(const [id,g] of this.groups)if(now-g.at>2500){this.groups.delete(id);this.stats.dropped++;}
@@ -94,6 +99,10 @@ class HlpClient extends EventEmitter {
     if(b[0]===0x0b) {this.send(Buffer.from([0x0c]));return;}
     if(b[0]!==0x0d || b.length<5)return;
     const channel=b[3],seq=b.readUInt16BE(1);
+    if([8,10,11].includes(channel)&&b.length===(channel===8?11:channel===10?5:14)) {
+      this.ackTrace.push({at:Date.now(),channel,cursor:seq,paused_channels:b[4],...(channel===8?{id:b.readUInt16BE(5),seq:b.readUInt16BE(7)}:{})});
+      if(this.ackTrace.length>24)this.ackTrace.shift();
+    }
     if(channel===8) {
       if(b.length!==11)return;
       const ackSeq=b.readUInt16BE(7),id=b.readUInt16BE(5),pending=this.outgoing.get(ackSeq);
@@ -151,6 +160,11 @@ class HlpClient extends EventEmitter {
       if(distance>0 && distance<32768){this.outgoing.delete(seq);this.stats.acks++;}
     }
   }
+  controlStatus() {
+    return {next_seq:this.seq,received_seq:this.recvSeq,
+      pending:[...this.outgoing].map(([seq,p])=>({seq,id:p.id,retries:p.retries,bytes:p.buffer.length})),
+      acknowledgements:this.ackTrace.slice()};
+  }
   drain(channel,now) {
     let key=channel+':'+this.expected[channel];
     // A missing whole message must not block the stream forever. Reset media
@@ -177,7 +191,7 @@ class HlpClient extends EventEmitter {
       const fragment=payload.subarray(index*1100,(index+1)*1100),b=Buffer.alloc(13+fragment.length),seq=this.seq;
       this.seq=next(seq);b[0]=13;b.writeUInt16BE(seq,1);b[3]=channel;b.writeUInt16BE(id,5);
       b.writeUInt16BE(fragment.length+8,7);b.writeUInt16BE(index,9);b.writeUInt16BE(count,11);fragment.copy(b,13);
-      this.outgoing.set(seq,{buffer:b,id,at:Date.now(),retries:0});this.send(b);
+      const now=Date.now();this.outgoing.set(seq,{buffer:b,id,at:now,createdAt:now,retries:0});this.send(b);
     }
   }
   cgi(command) {

@@ -2,6 +2,7 @@
 'use strict';
 const fs = require('node:fs');
 const path = require('node:path');
+const os = require('node:os');
 const {startBindingService} = require('./lib/binding-service.cjs');
 
 async function main() {
@@ -22,10 +23,18 @@ async function main() {
   }
   c.dataDir = path.resolve(base, c.dataDir);
   const service = await startBindingService(c, value => process.stdout.write(JSON.stringify(value) + '\n'));
+  const healthFile=path.join(os.tmpdir(),'jiumu-binding-health.json');
+  const health=()=>{
+    const next=healthFile+'.tmp';
+    fs.writeFileSync(next,JSON.stringify({at:Date.now(),...service.status()}),{mode:0o600});
+    fs.renameSync(next,healthFile);
+  };
+  health();const healthTimer=setInterval(health,10000);healthTimer.unref();
   process.stdout.write(JSON.stringify({event: 'listening', mode: c.mode ?? 'observe', ...service.addresses}) + '\n');
   let closing = false;
   const shutdown = async () => {
     if (closing) return; closing = true;
+    clearInterval(healthTimer);try{fs.unlinkSync(healthFile);}catch{}
     await service.close();
     process.stdout.write(JSON.stringify({event: 'stopped', ...service.status()}) + '\n');
   };

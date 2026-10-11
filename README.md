@@ -34,6 +34,7 @@
 - [数据去向与隐私](docs/privacy.md)
 - [协议研究与本地配对进度](docs/research/protocol.md)
 - [验证记录与待办](docs/validation.md)
+- [自启动、恢复与仅本地运行验证](docs/recovery.md)
 - [来源、第三方组件和发布边界](docs/provenance.md)
 
 本仓库同时放应用、部署配置和脱敏研究文档。`jiumu_bridge/` 是 Docker 构建目录，也作为 HAOS 加载项目录；无需维护两份桥接核心。HA 画面可用 Generic Camera，检测和录像可用现有 Frigate 集成；本项目没有另造 HA 自定义集成。

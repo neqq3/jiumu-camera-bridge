@@ -14,7 +14,8 @@ function localIPv4(ip) {
 function validateConfig(input) {
   const c = {...input, target: {...input.target}, mode: input.mode ?? 'observe',
     listen: input.listen ?? '127.0.0.1', httpPort: input.httpPort ?? 18084, tcpPort: input.tcpPort ?? 18085,
-    deadlineMs: input.deadlineMs ?? 15000, sessionMs: input.sessionMs ?? 300000};
+    deadlineMs: input.deadlineMs ?? 15000, sessionMs: input.sessionMs ?? 300000,
+    idleMs: input.idleMs ?? 90000};
   const atom = (v, n) => typeof v === 'string' && v.length >= 1 && v.length <= n && /^[A-Za-z0-9.-]+$/.test(v);
   if (c.p2pBootstrap !== undefined && (c.mode !== 'bind-once' || c.arm !== true || c.allowP2pBootstrap !== true ||
       !atom(c.p2pBootstrap.did, 23) || !atom(c.p2pBootstrap.license, 11) ||
@@ -26,7 +27,7 @@ function validateConfig(input) {
       !atom(c.target.firmware, 31) || typeof c.dataDir !== 'string' || !c.dataDir ||
       ![c.httpPort, c.tcpPort].every(p => Number.isInteger(p) && p >= 0 && p <= 65535) ||
       (c.httpPort !== 0 && c.httpPort === c.tcpPort) ||
-      ![c.deadlineMs, c.sessionMs].every(n => Number.isInteger(n) && n >= 100 && n <= 300000) ||
+      ![c.deadlineMs, c.sessionMs, c.idleMs].every(n => Number.isInteger(n) && n >= 100 && n <= 300000) ||
       (c.listen !== '127.0.0.1' && c.allowLan !== true) ||
       (c.mode === 'bind-once' && (!atom(c.target.uid, 31) || c.arm !== true))) {
     throw new Error('invalid_configuration');
@@ -56,14 +57,21 @@ async function startBindingService(input, log = () => {}) {
   const tcp = net.createServer(socket => {
     if (!accept(socket)) return;
     let registered = false, challenge = null, allowed = false, sent = false, frames = 0, bytes = 0;
-    const absolute = setTimeout(() => socket.destroy(), c.sessionMs);
-    let phaseTimer = setTimeout(() => socket.destroy(), c.deadlineMs);
+    let budgetAt = performance.now();
+    const connectedAt=performance.now();let receivedAt=connectedAt,closeReason='peer_closed';
+    const end=reason=>{closeReason=reason;socket.destroy();};
+    const absolute = setTimeout(() => end('unregistered_session_deadline'), c.sessionMs);
+    let phaseTimer = setTimeout(() => end('registration_deadline'), c.deadlineMs);
     let partialTimer;
     socket.setNoDelay(true);
-    socket.setTimeout(90000, () => socket.destroy());
+    socket.setTimeout(c.idleMs, () => end('idle_timeout'));
+    socket.on('end',()=>{closeReason='peer_end';});
+    socket.on('error',()=>{closeReason='peer_error';});
     socket.on('close', () => {
       if (activeSession === socket) activeSession = null;
       clearTimeout(absolute); clearTimeout(phaseTimer); clearTimeout(partialTimer);
+      if(registered)note('target_disconnected',{reason:stopping?'service_stop':closeReason,
+        sessionMs:Math.round(performance.now()-connectedAt),receivedAgoMs:Math.round(performance.now()-receivedAt)});
     });
     const send = (event, body) => {
       if (socket.destroyed || socket.writableLength > 16384) throw new Error('slow_peer');
@@ -86,11 +94,14 @@ async function startBindingService(input, log = () => {}) {
         activeSession = socket;
         registered = true; stats.tcpRegistered++; note('target_registered');
         note(same(body.uid, c.target.uid) ? 'target_owner_matches' : 'target_owner_differs');
-        clearTimeout(phaseTimer);
+        // A healthy authenticated camera needs a persistent control connection.
+        // Retain idle/partial/challenge deadlines and per-window traffic bounds,
+        // instead of forcing a cloud-style reconnect every five minutes.
+        clearTimeout(absolute); clearTimeout(phaseTimer);
         send(1, {timestamp: Math.floor(Date.now() / 1000)});
         if (c.mode === 'bind-once' && !store.attempted) {
           challenge = crypto.randomBytes(3).toString('hex');
-          phaseTimer = setTimeout(() => socket.destroy(), c.deadlineMs);
+          phaseTimer = setTimeout(() => end('challenge_deadline'), c.deadlineMs);
           send(2, {code: challenge});
         }
         return;
@@ -132,15 +143,20 @@ async function startBindingService(input, log = () => {}) {
     });
     socket.on('data', chunk => {
       try {
+        receivedAt=performance.now();
+        if (registered && performance.now() - budgetAt >= c.sessionMs) {
+          budgetAt = performance.now(); frames = 0; bytes = 0;
+        }
         bytes += chunk.length;
         if (bytes > 131072) throw new Error('session_limit');
         parser.push(chunk);
         if (!parser.pending) { clearTimeout(partialTimer); partialTimer = undefined; }
-        else if (!partialTimer) partialTimer = setTimeout(() => socket.destroy(), c.deadlineMs);
+        else if (!partialTimer) partialTimer = setTimeout(() => end('partial_frame_deadline'), c.deadlineMs);
       } catch (error) {
         // Use a closed vocabulary: parser and filesystem errors can contain private data.
         const reasons = ['registration_required', 'identity_mismatch', 'frame_limit', 'session_limit',
           'slow_peer', 'invalid_shadow', 'invalid_shadow_ack', 'unexpected_event'];
+        closeReason='request_rejected';
         reject(socket, reasons.includes(error.message) ? error.message : 'malformed_or_state_failure');
       }
     });
@@ -222,6 +238,7 @@ async function startBindingService(input, log = () => {}) {
     note('service_started');
   } catch (error) { await close(); throw error; }
   return {addresses: {http: server.address(), tcp: tcp.address()}, close,
-    status: () => ({...stats, mode: c.mode, deliveryAttempted: store.attempted, cameraAccepted: false, videoVerified: false})};
+    status: () => ({...stats, listening:tcp.listening&&server.listening, targetConnected:!!activeSession&&!activeSession.destroyed,
+      mode: c.mode, deliveryAttempted: store.attempted, cameraAccepted: false, videoVerified: false})};
 }
 module.exports = {startBindingService, validateConfig};

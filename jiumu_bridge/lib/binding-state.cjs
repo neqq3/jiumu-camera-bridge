@@ -4,6 +4,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const crypto = require('node:crypto');
 const {same} = require('./binding-codec.cjs');
+const {acquireLock} = require('./binding-lock.cjs');
 
 function atomicPrivateWrite(file, value) {
   const temp = file + '.' + crypto.randomBytes(8).toString('hex') + '.tmp';
@@ -25,10 +26,7 @@ function atomicPrivateWrite(file, value) {
 }
 function openState(directory, target) {
   fs.mkdirSync(directory, {recursive: true, mode: 0o700});
-  const lock = path.join(directory, 'binding.lock');
-  // Fail closed after a crash; never infer a stale lock merely from a recycled PID.
-  const lockFd = fs.openSync(lock, 'wx', 0o600);
-  fs.closeSync(lockFd);
+  const unlock=acquireLock(directory);
   const file = path.join(directory, 'binding-state.json');
   try {
     const fingerprint = crypto.createHash('sha256').update(JSON.stringify(target)).digest('hex');
@@ -70,8 +68,8 @@ function openState(directory, target) {
         atomicPrivateWrite(file, next);
         return next.password;
       },
-      close() { if (!closed) { closed = true; fs.unlinkSync(lock); } },
+      close() { if (!closed) { closed = true; unlock(); } },
     };
-  } catch (error) { fs.unlinkSync(lock); throw error; }
+  } catch (error) { unlock(); throw error; }
 }
 module.exports = {openState};

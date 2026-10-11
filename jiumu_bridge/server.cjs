@@ -1,7 +1,6 @@
 'use strict';
 const fs=require('node:fs'),path=require('node:path'),http=require('node:http'),crypto=require('node:crypto');
 const {spawn}=require('node:child_process');
-const {onboard}=require('./lib/onboarding.cjs');
 const {CameraSession}=require('./lib/session.cjs');
 const {network,identity}=require('./lib/hlp-crypto.cjs');
 const {isLan}=require('./lib/hlp-client.cjs');
@@ -11,6 +10,7 @@ const file=path.join(dataDir,'bridge.json');
 function atomic(name,value){const dest=path.join(dataDir,name);fs.writeFileSync(dest+'.tmp',value,{mode:0o600});fs.chmodSync(dest+'.tmp',0o600);fs.renameSync(dest+'.tmp',dest);fs.chmodSync(dest,0o600);}
 let options={};try{options=JSON.parse(fs.readFileSync(path.join(dataDir,'options.json')));}catch(_){}
 const ha=process.env.HA_INGRESS==='1',port=Number(process.env.PORT||18082),mediaPort=Number(process.env.MEDIA_PORT||18083);
+const localOnly=process.env.LOCAL_ONLY==='1'||options.local_only===true;
 const rtspPort=Number(process.env.RTSP_PORT||options.rtsp_port||18554),goApiPort=Number(process.env.GO2RTC_API_PORT||18084);
 let state=fs.existsSync(file)?JSON.parse(fs.readFileSync(file)):{version:1,cameras:[],rtsp:{username:'viewer',password:crypto.randomBytes(18).toString('hex')}};
 if(!fs.existsSync(file))atomic('bridge.json',JSON.stringify(state));
@@ -68,10 +68,11 @@ const api=http.createServer(async(req,res)=>{
     const name=route==='/'?'index.html':route.slice(1),type=name.endsWith('.js')?'text/javascript':name.endsWith('.css')?'text/css':'text/html';
     res.writeHead(200,{'content-type':type+'; charset=utf-8','cache-control':'no-store'});return fs.createReadStream(path.join(__dirname,'public',name)).pipe(res);
   }
-  if(req.method==='GET'&&route==='/api/mode')return json(res,200,{ingress:ha});
+  if(req.method==='GET'&&route==='/api/mode')return json(res,200,{ingress:ha,local_only:localOnly});
   if(!authorized(req))return json(res,401,{error:'请填写本地管理密钥'});
   // JSON + a custom header prevents cross-site form submissions; never trust forwarded IP headers.
   if(req.method==='POST'&&req.headers['x-jiumu-request']!=='1')return json(res,403,{error:'请求来源验证失败'});
+  if(localOnly&&['/api/login','/api/select'].includes(route))return json(res,403,{error:'仅本地模式已禁用厂商账号导入；现有摄像头凭据仍可用于局域网连接'});
   try {
     if(req.method==='GET'&&route==='/api/status')return json(res,200,{cameras:[...sessions.values()].map(s=>s.status()),rtsp_port:rtspPort,rtsp_ready:!!goChild});
     if(req.method==='GET'&&route==='/api/export')return json(res,200,{cameras:exportsFor(safeHost(url.searchParams.get('host')||req.headers.host))});
@@ -83,7 +84,7 @@ const api=http.createServer(async(req,res)=>{
       if(typeof input.account!=='string'||typeof input.password!=='string'||input.account.length>256||input.password.length>256)throw new Error('账号或密码格式错误');
       loginBusy=true;lastLogin=Date.now();
       try {
-        const devices=await onboard(input.account.trim(),input.password);input.password='';
+        const devices=await require('./lib/onboarding.cjs').onboard(input.account.trim(),input.password);input.password='';
         const ticket=crypto.randomBytes(24).toString('hex');pending.clear();pending.set(ticket,{devices,expires:Date.now()+600000});
         return json(res,200,{ticket,devices:devices.map((d,index)=>({index,name:d.name,supported:d.supported}))});
       } catch(_){return json(res,502,{error:'登录或设备列表获取失败，请核对账号密码、厂商服务和外网连接'});}finally{loginBusy=false;input.password='';}
