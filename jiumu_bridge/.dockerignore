@@ -1,0 +1,10 @@
+*
+!Dockerfile
+!server.cjs
+!lib/
+!lib/**
+!public/
+!public/**
+!licenses/
+!licenses/**
+!THIRD_PARTY.md

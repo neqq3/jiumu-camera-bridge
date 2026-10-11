@@ -1,0 +1,24 @@
+name: Jiumu Local Bridge
+version: "0.1.0"
+slug: jiumu_bridge
+description: 九目智联 A907-J 局域网音视频桥接，无需 Android 设备
+arch:
+  - amd64
+  - aarch64
+startup: services
+boot: auto
+init: true
+host_network: true
+ingress: true
+ingress_port: 18082
+ingress_stream: true
+panel_icon: mdi:cctv
+panel_title: 九目摄像头
+panel_admin: true
+stage: experimental
+environment:
+  HA_INGRESS: "1"
+options:
+  rtsp_port: 18554
+schema:
+  rtsp_port: port

@@ -1,0 +1,23 @@
+Jiumu Camera Bridge — licensing scope
+
+Copyright 2026 neqq3 and contributors.
+
+1. Project software, build files, tests, configuration examples, and code
+   snippets embedded in documentation are licensed under Apache License 2.0.
+   Full text: jiumu_bridge/licenses/Apache-2.0.txt
+   https://www.apache.org/licenses/LICENSE-2.0
+
+2. Original prose in Markdown documentation is licensed under Creative Commons
+   Attribution 4.0 International (CC BY 4.0), except this licensing notice,
+   reproduced license texts, and explicitly identified third-party material.
+   Full text: LICENSES/CC-BY-4.0.txt
+   https://creativecommons.org/licenses/by/4.0/
+   Attribution: Jiumu Camera Bridge contributors, with a link to the source
+   document and license, and an indication of changes.
+
+3. Third-party software and material retain their original terms. The project's
+   licenses do not relicense vendor software, vendor services, trademarks,
+   third-party patents, or other rights the contributors do not own.
+
+This is a split license by content type, not a choice of either license for
+every file. See docs/provenance.md and jiumu_bridge/THIRD_PARTY.md.
