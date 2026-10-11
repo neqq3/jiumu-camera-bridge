@@ -49,3 +49,12 @@ node --test --test-concurrency=1 scripts/media-encoder-lifecycle.test.cjs script
 ```
 
 生命周期测试用 Node 预加载器将编码器替换为模拟进程，仍使用真实的系统管道；不会改变临时目录禁止执行的挂载属性。完整音视频测试使用实际 FFmpeg 和 go2rtc。
+
+首段录像测试约 35 秒，模拟两个消费者在不同关键帧阶段加入已运行的流。首段与结束片段都检查轨道起点、时长、帧密度及完整解码。可通过环境变量选择与实际 Frigate 相同的录像和解码二进制；桥接编码仍使用 PATH 中的 FFmpeg：
+
+```sh
+RECORDER_FFMPEG_BIN=/path/to/frigate/ffmpeg node --test scripts/rtsp-startup.test.cjs
+RECORDER_FFMPEG_BIN=/path/to/frigate/ffmpeg node --test scripts/session-media-outage.test.cjs
+```
+
+开发回归中，`TEST_OLD_GOP=1` 可让首段测试使用旧的两秒关键帧间隔作失败对照，不改变生产默认值。已比较 FFmpeg 7 与实际 Frigate 携带的 FFmpeg 8；不能仅凭容器中存在某版本就认定录像进程使用它，应核对实际进程。

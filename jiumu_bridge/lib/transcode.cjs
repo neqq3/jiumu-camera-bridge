@@ -26,6 +26,9 @@ function mediaSources(base) {
   // whole producer so the next attempt negotiates both tracks together.
   // The input relay kills FFmpeg before propagating unexpected HTTP EOF,
   // preventing buffered frames from being flushed as a live arrival burst.
-  return [`exec:node ${JSON.stringify(path.join(__dirname,'media-encoder.cjs'))} -hide_banner -v error ${videoInput.replace('{input}',base+'/stream.mjpeg')} ${audioInput.replace('{input}',base+'/audio.wav')} -map 0:v:0 -map 1:a:0 -vf ${videoFilter} -c:v libx264 -preset ultrafast -tune zerolatency -threads:v 2 -g:v 20 -pix_fmt yuv420p -c:a aac -muxdelay 0 -f rtsp -rtsp_transport tcp {output}`];
+  // A newly joined stream-copy recorder waits for an independently decodable
+  // frame while audio can already arrive. At 10 fps, a one-second GOP limits
+  // this startup gap; it does not remove missing media during camera outages.
+  return [`exec:node ${JSON.stringify(path.join(__dirname,'media-encoder.cjs'))} -hide_banner -v error ${videoInput.replace('{input}',base+'/stream.mjpeg')} ${audioInput.replace('{input}',base+'/audio.wav')} -map 0:v:0 -map 1:a:0 -vf ${videoFilter} -c:v libx264 -preset ultrafast -tune zerolatency -threads:v 2 -g:v 10 -pix_fmt yuv420p -c:a aac -muxdelay 0 -f rtsp -rtsp_transport tcp {output}`];
 }
 module.exports={videoInput,videoFilter,audioInput,frigateInputArgs,frigateRecordArgs,mediaSources};

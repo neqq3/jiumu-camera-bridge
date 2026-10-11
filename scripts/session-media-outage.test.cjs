@@ -11,6 +11,7 @@ require('../jiumu_bridge/lib/media.cjs').MediaParser=class{constructor(fn){this.
 const {CameraSession}=require('../jiumu_bridge/lib/session.cjs');
 const {mediaSources,frigateInputArgs,frigateRecordArgs}=require('../jiumu_bridge/lib/transcode.cjs');
 const delay=ms=>new Promise(r=>setTimeout(r,ms));
+const recorderBinary=process.env.RECORDER_FFMPEG_BIN||'ffmpeg';
 test('real media pipeline recovers after independent video and audio stalls',{timeout:92000},async()=>{
  const dir=fs.mkdtempSync(path.join(os.tmpdir(),'jiumu-session-media-'));
  let session,server,go,record,tick,stopped=false,attempt=0;const checkpoints=[],created=new Map();let recorderWarnings='';
@@ -30,7 +31,7 @@ test('real media pipeline recovers after independent video and audio stalls',{ti
   for(let i=0;i<50;i++){assert.ifError(goError);try{if((await fetch('http://127.0.0.1:18989/api',{signal:AbortSignal.timeout(200)})).ok)break;}catch{}await delay(100);}
   function startRecorder(){if(stopped)return;attempt++;
    const outputArgs=[...frigateRecordArgs];outputArgs[outputArgs.indexOf('-segment_time')+1]='4';outputArgs[outputArgs.indexOf('-strftime')+1]='0';
-   record=spawn('ffmpeg',['-v','warning','-nostats',...frigateInputArgs,'-i','rtsp://127.0.0.1:18959/restream',...outputArgs,path.join(dir,`attempt-${attempt}-%03d.mp4`)],{stdio:['ignore','ignore','pipe']});
+   record=spawn(recorderBinary,['-v','warning','-nostats',...frigateInputArgs,'-i','rtsp://127.0.0.1:18959/restream',...outputArgs,path.join(dir,`attempt-${attempt}-%03d.mp4`)],{stdio:['ignore','ignore','pipe']});
    record.stderr.on('data',b=>{if(recorderWarnings.length<1024*1024)recorderWarnings+=b.toString();});
    record.once('close',()=>{if(!stopped)setTimeout(startRecorder,500).unref();});}
   startRecorder();
@@ -52,7 +53,7 @@ test('real media pipeline recovers after independent video and audio stalls',{ti
    if(v&&a&&Math.abs(Number(v.duration)-Number(a.duration))>=1.5)errors.push('track_duration_mismatch');
    if(v&&a&&Math.abs(Number(v.start_time)-Number(a.start_time))>=1.5)errors.push('track_origin_mismatch');
    if(phase&&Number(probe.format.duration)>=10)errors.push('recovery_segment_duration');
-   const decoded=spawnSync('ffmpeg',['-v','error','-i',file,'-map','0:v:0','-map','0:a:0','-fps_mode:v','passthrough','-enc_time_base:v','1:90000','-f','null','-'],{timeout:3000});
+   const decoded=spawnSync(recorderBinary,['-v','error','-i',file,'-map','0:v:0','-map','0:a:0','-fps_mode:v','passthrough','-enc_time_base:v','1:90000','-f','null','-'],{timeout:3000});
    if(decoded.status!==0||decoded.stderr.toString().trim())errors.push('full_clip_decode');
    if(errors.length)boundaryErrors.push({name,phase,errors});
    console.log(JSON.stringify({syntheticSegment:name,phase,createdMs:start,completedMs:mtime,errors,decodeExit:decoded.status,decodeWarning:decoded.stderr.toString().slice(0,200),probe}));
