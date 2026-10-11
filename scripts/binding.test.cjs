@@ -186,6 +186,9 @@ test('observe mode supports registration/heartbeat/shadow without sending passwo
   p.socket.write(Buffer.concat([wire(8, {area: 0, userid: target.uid}), wire(4, {bootup: 1, version: 7}), wire(0, {status: 'active'})]));
   assert.deepEqual(await p.read(), {event: 4, body: {version: 7}});
   assert.deepEqual(await p.read(), {event: 0, body: {}});
+  p.socket.write(Buffer.concat([wire(7, {version: 7}), wire(0, {})]));
+  assert.deepEqual(await p.read(), {event: 0, body: {}});
+  assert.ok(s.logs.some(x => x.event === 'system_shadow_ack_observed'));
   p.send(3, {code: 'unsolicited'}); await delay(30);
   assert.equal(p.queue.length, 0); assert.equal(s.status().bindingAttempts, 0);
   assert.equal(JSON.parse(fs.readFileSync(path.join(c.dataDir, 'binding-state.json'))).password, undefined);
@@ -240,6 +243,22 @@ test('out-of-order or wrong challenge cannot cause a credential write', async t 
   assert.equal(s.status().bindingAttempts, 0); assert.equal(s.status().deliveryAttempted, false);
 });
 
+test('optional local P2P bootstrap is explicitly armed, follows binding, and stops once the version is acknowledged', async t => {
+  const profile = {did: 'TEST00000000ABCDE', license: 'TESTLICENSE', address: 'DAS-00112233', version: 1};
+  const c = config(t, {mode: 'bind-once', arm: true, allowP2pBootstrap: true, p2pBootstrap: profile});
+  for (const bad of [{mode:'observe'}, {allowP2pBootstrap:false}, {p2pBootstrap:{...profile, version:256}},
+    {p2pBootstrap:{...profile, license:'x'.repeat(12)}}]) assert.throws(()=>validateConfig({...c,...bad}));
+  const s = await run(t,c), token = await bootstrap(s), p = await client(t,s);
+  p.send(1,registration(token)); await p.read(); const {code}=(await p.read()).body;
+  p.send(4,{version:0}); assert.deepEqual(await p.read(),{event:4,body:{version:0}});
+  p.send(2,{code,state:'allow'}); p.send(3,{code}); assert.equal((await p.read()).event,3);
+  p.send(4,{version:0}); const shadow=await p.read();
+  assert.deepEqual(shadow,{event:4,body:{version:1,desired:{p2p:{did:profile.did,license:profile.license,address:profile.address}}}});
+  p.send(7,{version:1}); p.send(4,{version:1});
+  assert.deepEqual(await p.read(),{event:4,body:{version:1}});
+  const logs=JSON.stringify(s.logs);for(const value of [profile.did,profile.license,profile.address])assert.ok(!logs.includes(value));
+});
+
 test('malformed frames, invalid JSON and frame flood close the session without writes', async t => {
   const s = await run(t, config(t)), token = await bootstrap(s);
   for (const bytes of [Buffer.alloc(8), Buffer.from('7856341201001020', 'hex'),
@@ -261,12 +280,24 @@ test('absolute registration/partial-frame deadlines and session lifetime release
   assert.equal(s.status().bindingAttempts, 0);
 });
 
-test('single active TCP session, state locks and failed listen cleanup', async t => {
+test('authenticated reconnect replaces a half-open session; unknown clients cannot evict it', async t => {
+  const s=await run(t,config(t,{deadlineMs:150})),token=await bootstrap(s);
+  const old=await client(t,s);old.send(1,registration(token));await old.read();
+  const idle=await client(t,s);await idle.closed;
+  old.send(0,{});assert.equal((await old.read()).event,0);
+  const bad=await client(t,s);bad.send(1,registration('wrong-token'));await bad.closed;
+  old.send(0,{});assert.equal((await old.read()).event,0);
+  const replacement=await client(t,s);replacement.send(1,registration(token));
+  assert.equal((await replacement.read()).event,1);await old.closed;
+  replacement.send(0,{});assert.equal((await replacement.read()).event,0);
+  assert.equal(s.status().bindingAttempts,0);
+  assert.equal(s.logs.filter(x=>x.event==='authenticated_session_replaced').length,1);
+});
+
+test('state locks and failed listen cleanup', async t => {
   const c = config(t), s = await run(t, c);
   await assert.rejects(startBindingService(c));
   assert.ok(fs.existsSync(path.join(c.dataDir, 'binding.lock')));
-  const p = await client(t, s), extra = await client(t, s); await extra.closed;
-  p.socket.destroy(); await p.closed;
   const failConfig = config(t, {httpPort: s.addresses.http.port});
   await assert.rejects(startBindingService(failConfig));
   assert.equal(fs.existsSync(path.join(failConfig.dataDir, 'binding.lock')), false);

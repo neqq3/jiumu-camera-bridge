@@ -16,6 +16,10 @@ function validateConfig(input) {
     listen: input.listen ?? '127.0.0.1', httpPort: input.httpPort ?? 18084, tcpPort: input.tcpPort ?? 18085,
     deadlineMs: input.deadlineMs ?? 15000, sessionMs: input.sessionMs ?? 300000};
   const atom = (v, n) => typeof v === 'string' && v.length >= 1 && v.length <= n && /^[A-Za-z0-9.-]+$/.test(v);
+  if (c.p2pBootstrap !== undefined && (c.mode !== 'bind-once' || c.arm !== true || c.allowP2pBootstrap !== true ||
+      !atom(c.p2pBootstrap.did, 23) || !atom(c.p2pBootstrap.license, 11) ||
+      typeof c.p2pBootstrap.address !== 'string' || !/^DAS-[a-f0-9]+$/i.test(c.p2pBootstrap.address) || c.p2pBootstrap.address.length > 254 ||
+      !Number.isInteger(c.p2pBootstrap.version) || c.p2pBootstrap.version < 1 || c.p2pBootstrap.version > 255)) throw new Error('invalid_p2p_bootstrap');
   if (!['observe', 'bind-once'].includes(c.mode) || !localIPv4(c.listen) ||
       !localIPv4(c.advertiseIp) || !localIPv4(c.target.sourceIp) ||
       !atom(c.target.did, 23) || !(atom(c.target.code, 23) || (c.target.code === undefined && c.learnCodeFromBootstrap === true)) ||
@@ -37,13 +41,13 @@ async function startBindingService(input, log = () => {}) {
   const sockets = new Set();
   const stats = {httpAccepted: 0, tcpRegistered: 0, rejected: 0, bindingAttempts: 0, shadowSeen: 0};
   let tcpPort, activeSession = null, stopping = false;
-  // Only fixed names/counts leave this service. Never include requests, device IDs, addresses or errors.
-  const note = event => { try { log({event}); } catch {} };
-  const reject = socket => { stats.rejected++; note('request_rejected'); socket.destroy(); };
+  // Only fixed names and protocol event numbers leave this service, never payloads or identifiers.
+  const note = (event, details = {}) => { try { log({event, ...details}); } catch {} };
+  const reject = (socket, reason = 'invalid_request') => { stats.rejected++; note('request_rejected', {reason}); socket.destroy(); };
   function accept(socket) {
     socket.on('error', () => {});
     if (stopping || socket.remoteAddress !== c.target.sourceIp || sockets.size >= 4) {
-      reject(socket); return false;
+      reject(socket, socket.remoteAddress !== c.target.sourceIp ? 'source_not_allowed' : 'connection_limit'); return false;
     }
     sockets.add(socket);
     socket.on('close', () => sockets.delete(socket));
@@ -51,8 +55,6 @@ async function startBindingService(input, log = () => {}) {
   }
   const tcp = net.createServer(socket => {
     if (!accept(socket)) return;
-    if (activeSession) { reject(socket); return; }
-    activeSession = socket;
     let registered = false, challenge = null, allowed = false, sent = false, frames = 0, bytes = 0;
     const absolute = setTimeout(() => socket.destroy(), c.sessionMs);
     let phaseTimer = setTimeout(() => socket.destroy(), c.deadlineMs);
@@ -71,10 +73,19 @@ async function startBindingService(input, log = () => {}) {
       if (socket.destroyed || ++frames > 128) throw new Error('frame_limit');
       const body = parseObject(plain);
       if (!registered) {
-        if (event !== 1 || !same(body.did, c.target.did) || !same(body.code, store.deviceCode) ||
+        if (event !== 1) throw new Error('registration_required');
+        if (!same(body.did, c.target.did) || !same(body.code, store.deviceCode) ||
             !same(body.version, c.target.firmware) || !same(body.token, store.token) ||
             (c.mode === 'bind-once' && !same(body.uid, c.target.uid))) throw new Error('identity_mismatch');
+        // A reboot may leave the old TCP connection half-open. Only a fully
+        // authenticated replacement can evict it; an unauthenticated socket
+        // is bounded by the registration deadline and the TCP connection cap.
+        if (activeSession && activeSession !== socket) {
+          activeSession.destroy(); note('authenticated_session_replaced');
+        }
+        activeSession = socket;
         registered = true; stats.tcpRegistered++; note('target_registered');
+        note(same(body.uid, c.target.uid) ? 'target_owner_matches' : 'target_owner_differs');
         clearTimeout(phaseTimer);
         send(1, {timestamp: Math.floor(Date.now() / 1000)});
         if (c.mode === 'bind-once' && !store.attempted) {
@@ -88,12 +99,23 @@ async function startBindingService(input, log = () => {}) {
       // A cached endpoint with an old token will be rejected; use fresh bootstrap, never bypass identity checks.
       if (event === 8) { note('hello_observed'); return; }
       if (event === 4) {
-        // No desired settings/P2P provisioning: acknowledge only the camera's existing shadow version.
+        // Echo existing settings by default. The explicit, firmware-specific lab profile
+        // may initialize P2P after binding; never send unrelated desired settings.
         if (!Number.isInteger(body.version) || body.version < 0 || body.version > 0x7fffffff) throw new Error('invalid_shadow');
         stats.shadowSeen++; note(sent ? 'post_delivery_shadow_observed' : 'shadow_observed');
-        send(4, {version: body.version}); return;
+        if (c.p2pBootstrap && store.attempted && body.version < c.p2pBootstrap.version) {
+          const {did, license, address, version} = c.p2pBootstrap;
+          send(4, {version, desired: {p2p: {did, license, address}}});
+          note('local_p2p_bootstrap_sent');
+        } else send(4, {version: body.version});
+        return;
       }
       if (event === 5) { note('shadow_ack_observed'); return; }
+      // Firmware 0x3fc14 acknowledges the system shadow using event 7.
+      if (event === 7) {
+        if (!Number.isInteger(body.version) || body.version < 0 || body.version > 0x7fffffff) throw new Error('invalid_shadow_ack');
+        note('system_shadow_ack_observed'); return;
+      }
       if (event === 2 && challenge && !sent && !allowed && same(body.code, challenge) && body.state === 'allow') {
         allowed = true; note('binding_challenge_allowed'); return;
       }
@@ -105,6 +127,7 @@ async function startBindingService(input, log = () => {}) {
       }
       // In observation mode add/bind requests never trigger a password response.
       if (c.mode === 'observe' && (event === 2 || event === 3)) { note('binding_request_observed'); return; }
+      note('unsupported_event', {number: event});
       throw new Error('unexpected_event');
     });
     socket.on('data', chunk => {
@@ -114,7 +137,12 @@ async function startBindingService(input, log = () => {}) {
         parser.push(chunk);
         if (!parser.pending) { clearTimeout(partialTimer); partialTimer = undefined; }
         else if (!partialTimer) partialTimer = setTimeout(() => socket.destroy(), c.deadlineMs);
-      } catch { reject(socket); }
+      } catch (error) {
+        // Use a closed vocabulary: parser and filesystem errors can contain private data.
+        const reasons = ['registration_required', 'identity_mismatch', 'frame_limit', 'session_limit',
+          'slow_peer', 'invalid_shadow', 'invalid_shadow_ack', 'unexpected_event'];
+        reject(socket, reasons.includes(error.message) ? error.message : 'malformed_or_state_failure');
+      }
     });
   });
   const server = http.createServer({maxHeaderSize: 4096}, (req, res) => {

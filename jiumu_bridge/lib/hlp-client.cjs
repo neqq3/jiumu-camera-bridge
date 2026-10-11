@@ -98,6 +98,13 @@ class HlpClient extends EventEmitter {
       if(b.length!==11)return;
       const ackSeq=b.readUInt16BE(7),id=b.readUInt16BE(5),pending=this.outgoing.get(ackSeq);
       if(pending && pending.id===id){this.outgoing.delete(ackSeq);this.stats.acks++;}
+      this.ackThrough(seq);
+      return;
+    }
+    // SDK channels 10 and 11 carry the first sequence not yet received.
+    // Channel 11 adds nine bytes of flow statistics and needs no reply.
+    if(channel===10 || channel===11) {
+      if(b.length===(channel===10?5:14))this.ackThrough(seq);
       return;
     }
     if(channel===9) {const answer=Buffer.from([13,0,0,10,0]);answer.writeUInt16BE(this.recvSeq,1);this.send(answer);return;}
@@ -134,6 +141,15 @@ class HlpClient extends EventEmitter {
     } else if(body[0]!==0){this.stats.invalid++;return;}
     if(this.complete.size>=128)return this.fail('Message ordering buffer exceeded');
     this.complete.set(key,{payload,at:Date.now(),id});this.drain(channel,Date.now());
+  }
+  ackThrough(cursor) {
+    // Never accept a cursor beyond what we sent. Current control traffic and
+    // the retry deadline keep pending sequence spans below the modulo half-range.
+    if(cursor===65535 || (this.seq-cursor+65535)%65535>32767)return;
+    for(const seq of this.outgoing.keys()) {
+      const distance=(cursor-seq+65535)%65535;
+      if(distance>0 && distance<32768){this.outgoing.delete(seq);this.stats.acks++;}
+    }
   }
   drain(channel,now) {
     let key=channel+':'+this.expected[channel];
