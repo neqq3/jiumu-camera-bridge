@@ -13,4 +13,10 @@
 node scripts/check.cjs
 ```
 
+本地绑定服务的模拟客户端测试只使用本机回环地址，不访问摄像头或厂商：
+
+```sh
+node --test --test-timeout=20000 scripts/binding.test.cjs
+```
+
 公开 issue 适合兼容性与非敏感错误信息。涉及凭据泄露或认证问题请先查看 SECURITY.md，不要贴真实数据。

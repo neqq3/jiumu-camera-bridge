@@ -1,0 +1,199 @@
+// SPDX-License-Identifier: Apache-2.0
+'use strict';
+const net = require('node:net');
+const http = require('node:http');
+const crypto = require('node:crypto');
+const {createCodec, parseObject, same} = require('./binding-codec.cjs');
+const {openState} = require('./binding-state.cjs');
+
+function localIPv4(ip) {
+  if (!net.isIPv4(ip)) return false;
+  const [a, b] = ip.split('.').map(Number);
+  return a === 127 || a === 10 || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168);
+}
+function validateConfig(input) {
+  const c = {...input, target: {...input.target}, mode: input.mode ?? 'observe',
+    listen: input.listen ?? '127.0.0.1', httpPort: input.httpPort ?? 18084, tcpPort: input.tcpPort ?? 18085,
+    deadlineMs: input.deadlineMs ?? 15000, sessionMs: input.sessionMs ?? 300000};
+  const atom = (v, n) => typeof v === 'string' && v.length >= 1 && v.length <= n && /^[A-Za-z0-9.-]+$/.test(v);
+  if (!['observe', 'bind-once'].includes(c.mode) || !localIPv4(c.listen) ||
+      !localIPv4(c.advertiseIp) || !localIPv4(c.target.sourceIp) ||
+      !atom(c.target.did, 23) || !(atom(c.target.code, 23) || (c.target.code === undefined && c.learnCodeFromBootstrap === true)) ||
+      !atom(c.target.firmware, 31) || typeof c.dataDir !== 'string' || !c.dataDir ||
+      ![c.httpPort, c.tcpPort].every(p => Number.isInteger(p) && p >= 0 && p <= 65535) ||
+      (c.httpPort !== 0 && c.httpPort === c.tcpPort) ||
+      ![c.deadlineMs, c.sessionMs].every(n => Number.isInteger(n) && n >= 100 && n <= 300000) ||
+      (c.listen !== '127.0.0.1' && c.allowLan !== true) ||
+      (c.mode === 'bind-once' && (!atom(c.target.uid, 31) || c.arm !== true))) {
+    throw new Error('invalid_configuration');
+  }
+  return c;
+}
+
+async function startBindingService(input, log = () => {}) {
+  const c = validateConfig(input);
+  const codec = createCodec(c.key, c.iv);
+  const store = openState(c.dataDir, {did: c.target.did, code: c.target.code, firmware: c.target.firmware, uid: c.target.uid ?? ''});
+  const sockets = new Set();
+  const stats = {httpAccepted: 0, tcpRegistered: 0, rejected: 0, bindingAttempts: 0, shadowSeen: 0};
+  let tcpPort, activeSession = null, stopping = false;
+  // Only fixed names/counts leave this service. Never include requests, device IDs, addresses or errors.
+  const note = event => { try { log({event}); } catch {} };
+  const reject = socket => { stats.rejected++; note('request_rejected'); socket.destroy(); };
+  function accept(socket) {
+    socket.on('error', () => {});
+    if (stopping || socket.remoteAddress !== c.target.sourceIp || sockets.size >= 4) {
+      reject(socket); return false;
+    }
+    sockets.add(socket);
+    socket.on('close', () => sockets.delete(socket));
+    return true;
+  }
+  const tcp = net.createServer(socket => {
+    if (!accept(socket)) return;
+    if (activeSession) { reject(socket); return; }
+    activeSession = socket;
+    let registered = false, challenge = null, allowed = false, sent = false, frames = 0, bytes = 0;
+    const absolute = setTimeout(() => socket.destroy(), c.sessionMs);
+    let phaseTimer = setTimeout(() => socket.destroy(), c.deadlineMs);
+    let partialTimer;
+    socket.setNoDelay(true);
+    socket.setTimeout(90000, () => socket.destroy());
+    socket.on('close', () => {
+      if (activeSession === socket) activeSession = null;
+      clearTimeout(absolute); clearTimeout(phaseTimer); clearTimeout(partialTimer);
+    });
+    const send = (event, body) => {
+      if (socket.destroyed || socket.writableLength > 16384) throw new Error('slow_peer');
+      socket.write(codec.frame(event, body));
+    };
+    const parser = codec.parser((event, plain) => {
+      if (socket.destroyed || ++frames > 128) throw new Error('frame_limit');
+      const body = parseObject(plain);
+      if (!registered) {
+        if (event !== 1 || !same(body.did, c.target.did) || !same(body.code, store.deviceCode) ||
+            !same(body.version, c.target.firmware) || !same(body.token, store.token) ||
+            (c.mode === 'bind-once' && !same(body.uid, c.target.uid))) throw new Error('identity_mismatch');
+        registered = true; stats.tcpRegistered++; note('target_registered');
+        clearTimeout(phaseTimer);
+        send(1, {timestamp: Math.floor(Date.now() / 1000)});
+        if (c.mode === 'bind-once' && !store.attempted) {
+          challenge = crypto.randomBytes(3).toString('hex');
+          phaseTimer = setTimeout(() => socket.destroy(), c.deadlineMs);
+          send(2, {code: challenge});
+        }
+        return;
+      }
+      if (event === 0) { send(0, {}); return; }
+      // A cached endpoint with an old token will be rejected; use fresh bootstrap, never bypass identity checks.
+      if (event === 8) { note('hello_observed'); return; }
+      if (event === 4) {
+        // No desired settings/P2P provisioning: acknowledge only the camera's existing shadow version.
+        if (!Number.isInteger(body.version) || body.version < 0 || body.version > 0x7fffffff) throw new Error('invalid_shadow');
+        stats.shadowSeen++; note(sent ? 'post_delivery_shadow_observed' : 'shadow_observed');
+        send(4, {version: body.version}); return;
+      }
+      if (event === 5) { note('shadow_ack_observed'); return; }
+      if (event === 2 && challenge && !sent && !allowed && same(body.code, challenge) && body.state === 'allow') {
+        allowed = true; note('binding_challenge_allowed'); return;
+      }
+      if (event === 3 && challenge && !sent && allowed && same(body.code, challenge)) {
+        const password = store.prepareDelivery(c.target.uid);
+        sent = true; stats.bindingAttempts++; clearTimeout(phaseTimer);
+        send(3, {code: challenge, uid: c.target.uid, password});
+        note('binding_delivery_attempted'); return;
+      }
+      // In observation mode add/bind requests never trigger a password response.
+      if (c.mode === 'observe' && (event === 2 || event === 3)) { note('binding_request_observed'); return; }
+      throw new Error('unexpected_event');
+    });
+    socket.on('data', chunk => {
+      try {
+        bytes += chunk.length;
+        if (bytes > 131072) throw new Error('session_limit');
+        parser.push(chunk);
+        if (!parser.pending) { clearTimeout(partialTimer); partialTimer = undefined; }
+        else if (!partialTimer) partialTimer = setTimeout(() => socket.destroy(), c.deadlineMs);
+      } catch { reject(socket); }
+    });
+  });
+  const server = http.createServer({maxHeaderSize: 4096}, (req, res) => {
+    if (!sockets.has(req.socket)) { req.socket.destroy(); return; }
+    res.shouldKeepAlive = false;
+    let size = 0, chunks = [], done = false;
+    const timer = setTimeout(() => req.destroy(), c.deadlineMs);
+    const finish = (code, body) => {
+      if (done) return;
+      done = true; clearTimeout(timer);
+      const data = Buffer.from(JSON.stringify(body));
+      res.writeHead(code, {'Content-Type': 'application/json', 'Content-Length': data.length, 'Connection': 'close', 'Cache-Control': 'no-store'});
+      res.end(data);
+    };
+    const deny = code => { stats.rejected++; note('request_rejected'); finish(code, {error: 'request_rejected'}); };
+    req.on('close', () => clearTimeout(timer));
+    req.on('error', () => {});
+    if (req.method !== 'POST' || req.url !== '/node/query') { deny(404); return; }
+    if (req.headers['transfer-encoding'] || !/^(0|[1-9][0-9]*)$/.test(req.headers['content-length'] ?? '') ||
+        Number(req.headers['content-length']) > 2048) { deny(413); return; }
+    req.on('data', chunk => {
+      size += chunk.length;
+      if (size > 2048) { deny(413); req.destroy(); } else chunks.push(chunk);
+    });
+    req.on('end', () => {
+      if (done) return;
+      try {
+        const body = parseObject(Buffer.concat(chunks)); chunks = [];
+        if (!same(body.did, c.target.did) || typeof body.code !== 'string' || !/^[A-Za-z0-9.-]{1,23}$/.test(body.code) ||
+            !same(codec.fromBase64(body.secret).toString('utf8'), c.target.did + '_' + body.code) ||
+            !store.pinDeviceCode(body.code)) {
+          deny(403); return;
+        }
+        // Firmware 0x42aa0 requires four nonempty underscore-delimited fields.
+        // It uses IP/domain/port and only checks presence of the fourth; it never consumes its value.
+        const route = `${c.advertiseIp}_${c.advertiseIp}_${tcpPort}_local`;
+        stats.httpAccepted++; note('target_bootstrap_accepted');
+        finish(200, {token: store.token, secret: codec.encrypt(Buffer.from(route)).toString('base64')});
+      } catch { deny(400); }
+    });
+  });
+  server.on('connection', socket => {
+    if (!accept(socket)) return;
+    const absolute = setTimeout(() => socket.destroy(), c.deadlineMs);
+    socket.on('close', () => clearTimeout(absolute));
+    socket.setTimeout(c.deadlineMs, () => socket.destroy());
+  });
+  server.on('clientError', (_error, socket) => reject(socket));
+  server.on('checkContinue', (req, res) => { res.writeHead(417, {'Connection': 'close'}); res.end(); });
+  server.requestTimeout = c.deadlineMs;
+  server.headersTimeout = c.deadlineMs;
+  server.maxRequestsPerSocket = 1;
+  tcp.maxConnections = 2; server.maxConnections = 4;
+  async function listen(s, port) {
+    await new Promise((resolve, rejectPromise) => {
+      const onError = e => { s.removeListener('listening', onListen); rejectPromise(e); };
+      const onListen = () => { s.removeListener('error', onError); resolve(); };
+      s.once('error', onError); s.once('listening', onListen); s.listen(port, c.listen);
+    });
+  }
+  let closePromise;
+  function close() {
+    if (closePromise) return closePromise;
+    stopping = true;
+    closePromise = (async () => {
+      for (const socket of sockets) socket.destroy();
+      await Promise.all([tcp, server].map(s => s.listening ? new Promise(resolve => s.close(resolve)) : undefined));
+      store.close();
+    })();
+    return closePromise;
+  }
+  try {
+    await listen(tcp, c.tcpPort); tcpPort = tcp.address().port;
+    await listen(server, c.httpPort);
+    tcp.on('error', () => { note('listener_failed'); void close(); });
+    server.on('error', () => { note('listener_failed'); void close(); });
+    note('service_started');
+  } catch (error) { await close(); throw error; }
+  return {addresses: {http: server.address(), tcp: tcp.address()}, close,
+    status: () => ({...stats, mode: c.mode, deliveryAttempted: store.attempted, cameraAccepted: false, videoVerified: false})};
+}
+module.exports = {startBindingService, validateConfig};

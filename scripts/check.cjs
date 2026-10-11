@@ -17,5 +17,6 @@ for(const file of files){
   assert.ok(fs.existsSync(resolved),'Broken local link: '+path.relative(root,file));links++;
  }
 }
-for(const name of ['hlp-client','hlp-crypto','media','session','onboarding','onboarding_crypto'])require('../jiumu_bridge/lib/'+name+'.cjs');
-console.log(JSON.stringify({syntaxChecked:scripts,localLinksChecked:links,modulesLoaded:6,networkAccess:false}));
+const modules=['hlp-client','hlp-crypto','media','session','onboarding','onboarding_crypto','binding-codec','binding-state','binding-service'];
+for(const name of modules)require('../jiumu_bridge/lib/'+name+'.cjs');
+console.log(JSON.stringify({syntaxChecked:scripts,localLinksChecked:links,modulesLoaded:modules.length,networkAccess:false}));

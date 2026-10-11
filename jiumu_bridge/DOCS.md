@@ -15,4 +15,6 @@ Ingress 通过 HA 认证；直连管理端口被拒绝。RTSP 使用独立本地
 
 本加载项提供音视频，不负责人员识别、录像或自动创建 HA 实体。只看画面可用 Generic Camera；检测和录像使用 Frigate 及其 HA 集成。首次账号导入会连接厂商服务；摄像头自身是否联网尚未隔离验证。
 
+保留厂商服务与隔离外网由用户选择，见 [接入与联网方式](../docs/connection-modes.md)。无账号本地绑定仍在研究；加载项当前不会修改路由器，不能通过网页开关自动实现全设备离云。
+
 参考：[HA 应用仓库](https://developers.home-assistant.io/docs/apps/repository/)、[本地应用教程](https://developers.home-assistant.io/docs/apps/tutorial/)、[Frigate HA 集成](https://docs.frigate.video/integrations/home-assistant/)。

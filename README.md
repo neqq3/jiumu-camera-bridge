@@ -25,6 +25,9 @@
 
 ## 使用
 
+- [选择接入与联网方式：厂商共存、账号辅助后隔离、无账号研究路线](docs/connection-modes.md)
+- [单设备 DNS 与路由方案](docs/router-routing.md)
+- [本地绑定实验服务：实现、启动与验证边界](docs/local-binding-service.md)
 - [Docker 安装](docs/install.md)
 - [Home Assistant OS 加载项](jiumu_bridge/DOCS.md)
 - [Frigate / HA 接入](docs/integrations.md)
