@@ -5,6 +5,8 @@ const crypto = require('node:crypto');
 const https = require('node:https');
 const tls = require('node:tls');
 const {deviceConfig, properties} = require('./onboarding_crypto.cjs');
+const {network,identity}=require('./hlp-crypto.cjs');
+const {SetupError}=require('./setup-errors.cjs');
 
 // Shared application identifiers, not a user's account or camera credentials.
 const APP_SECRET = 'c0d1e2f3g4h5i6j7k8l9m0n1o2p3q4r5s6t7u8v9w0x1y2z';
@@ -27,13 +29,13 @@ function request(path, body) {
       res.on('end',()=>{
         try {
           const obj=JSON.parse(Buffer.concat(chunks).toString());
-          if(res.statusCode!==200 || obj.code!==200) throw new Error(`Vendor login rejected (HTTP ${res.statusCode}, code ${Number(obj.code) || 0})`);
+          if(res.statusCode!==200 || obj.code!==200) throw new SetupError('login_rejected');
           resolve(obj.data);
-        } catch(e) {reject(e instanceof SyntaxError ? new Error('Invalid vendor response') : e);}
+        } catch(e) {reject(e instanceof SetupError ? e : new SetupError('cloud_response'));}
       });
     });
-    req.on('timeout',()=>req.destroy(new Error('Login request timed out')));
-    req.on('error',reject);req.end(data);
+    req.on('timeout',()=>req.destroy(new SetupError('cloud_unreachable')));
+    req.on('error',()=>reject(new SetupError('cloud_unreachable')));req.end(data);
   });
 }
 function varint(number) {
@@ -134,18 +136,29 @@ function getDevices(uid,token,{timeout=25000,onProgress=()=>{}}={}) {
     });
   });
 }
+function prepareDevices(userId,devices){
+  if(!Array.isArray(devices))throw new SetupError('device_list');
+  return devices.map(device=>{
+    const name=String(device?.info?.nickname||'Camera').slice(0,100);
+    if(Number(device?.p2p?.type)!==26)return {name,supported:false,reason:'此设备协议暂未支持',config:null};
+    try {
+      const config=deviceConfig(userId,device);network(config.server);identity(config.did);
+      return {name,supported:true,config};
+    }catch(_){return {name,supported:false,reason:'设备连接信息不可用，请在官方 APP 确认绑定后重新获取',config:null};}
+  });
+}
 async function onboard(account,password,{onProgress=()=>{}}={}) {
-  if(!account || !password)throw new Error('Account and password are required');
+  if(!account || !password)throw new SetupError('account_input');
   const lookup=await request('/user/login/textOfId',{text:account,oemid:'VSTC',skipName:false});
-  if(!lookup?.uid)throw new Error('Account lookup did not return a user ID');
+  if(!lookup?.uid)throw new SetupError('cloud_response');
   onProgress('Account found');
   const login=await request('/user/login/common',{uid:String(lookup.uid),password});
-  if(!login?.token || !login.uid)throw new Error('Login did not return a session');
+  if(!login?.token || !login.uid)throw new SetupError('cloud_response');
   onProgress('Independent account login succeeded');
-  const devices=await getDevices(String(login.uid),login.token,{onProgress});
+  let devices;
+  try{devices=await getDevices(String(login.uid),login.token,{onProgress});}
+  catch(_){throw new SetupError('device_list');}
   // Deliberately return camera data only; never persist the cloud session/password.
-  return devices.map(device=>({name:device.info?.nickname || 'Camera',
-    supported:Number(device.p2p?.type)===26,
-    config:Number(device.p2p?.type)===26?deviceConfig(login.uid,device):null}));
+  return prepareDevices(login.uid,devices);
 }
-module.exports={signedHeaders,onboard,getDevices,protobuf,varint,readVarint,properties};
+module.exports={signedHeaders,onboard,getDevices,protobuf,varint,readVarint,properties,prepareDevices};

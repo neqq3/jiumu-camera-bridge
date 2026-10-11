@@ -3,7 +3,7 @@ const $=id=>document.getElementById(id);let token=sessionStorage.getItem('jiumu-
 const msg=text=>{$('message').textContent=text;};
 async function api(route,body) {
  const res=await fetch('api/'+route,{method:body?'POST':'GET',headers:{Authorization:'Bearer '+token,'Content-Type':'application/json','X-Jiumu-Request':'1'},body:body?JSON.stringify(body):undefined});
- const data=await res.json();if(!res.ok)throw new Error(data.error||'连接失败，请重试');return data;
+ let data;try{data=await res.json();}catch(_){throw new Error('桥接服务返回异常，请稍后重试。');}if(!res.ok){const error=new Error(data.error||'连接失败，请重试');error.code=data.code;throw error;}return data;
 }
 function lock(form,value){form.querySelectorAll('button').forEach(b=>b.disabled=value);}
 $('unlock').onsubmit=async e=>{e.preventDefault();token=$('key').value;try{await api('status');sessionStorage.setItem('jiumu-admin',token);$('key').value='';$('unlock').hidden=true;msg('');await refresh();}catch(e){msg(e.message);}};
@@ -11,13 +11,14 @@ $('login').onsubmit=async e=>{
  e.preventDefault();lock($('login'),true);msg('正在登录并读取设备列表…');
  try{const result=await api('login',{account:$('account').value,password:$('password').value});ticket=result.ticket;$('password').value='';$('devices').replaceChildren();
  for(const d of result.devices){const row=document.createElement('div');row.className='choice';const label=document.createElement('label'),check=document.createElement('input');check.type='checkbox';check.value=d.index;check.disabled=!d.supported;check.checked=d.supported&&result.devices.filter(x=>x.supported).length===1;label.append(check,document.createTextNode(d.name));row.append(label);
- const note=document.createElement('small');note.textContent=d.supported?'可使用本地协议连接':'此设备协议暂未支持';row.append(note);
+ const note=document.createElement('small');note.textContent=d.supported?'可使用本地协议连接':d.reason||'此设备协议暂未支持';row.append(note);
  if(d.supported){const ip=document.createElement('input');ip.type='text';ip.dataset.index=d.index;ip.placeholder='摄像头 IP（可选，默认自动发现）';ip.setAttribute('aria-label',d.name+' 的可选局域网 IP');row.append(ip);}$('devices').append(row);}
- $('login').hidden=true;$('choose').hidden=false;msg(result.devices.length?'请选择需要接入的摄像头。':'账号内没有摄像头，请先在 APP 中绑定。');
+ const available=result.devices.some(d=>d.supported);$('save-selection').disabled=!available;
+ $('login').hidden=true;$('choose').hidden=false;msg(!result.devices.length?'账号内没有摄像头，请先在 APP 中绑定后返回登录。':available?'请选择需要接入的摄像头。':'账号内暂无可接入设备，请查看各设备的原因。');
  }catch(e){msg(e.message);}finally{$('password').value='';lock($('login'),false);}
 };
 $('choose').onsubmit=async e=>{e.preventDefault();const indices=[...$('devices').querySelectorAll('input:checked')].map(x=>Number(x.value));if(!indices.length)return msg('请至少选择一台摄像头。');const ipHints={};$('devices').querySelectorAll('[data-index]').forEach(x=>ipHints[x.dataset.index]=x.value.trim());lock($('choose'),true);
- try{await api('select',{ticket,indices,ipHints});$('choose').hidden=true;ticket='';msg('已保存，正在通过局域网连接。');await refresh();}catch(e){msg(e.message);}finally{lock($('choose'),false);}};
+ try{await api('select',{ticket,indices,ipHints});$('choose').hidden=true;ticket='';msg('已保存，正在通过局域网连接。');await refresh();}catch(e){msg(e.message);if(e.code==='login_expired'){ticket='';$('choose').hidden=true;$('login').hidden=false;}}finally{lock($('choose'),false);}};
 $('back').onclick=()=>{$('choose').hidden=true;$('login').hidden=false;};
 $('replace').onclick=()=>{$('login').hidden=false;$('choose').hidden=true;$('account').focus();};
 async function preview(){if(!selected)return;try{const r=await fetch('api/snapshot/'+selected,{headers:{Authorization:'Bearer '+token}});if(!r.ok)throw new Error();const next=URL.createObjectURL(await r.blob());$('preview').src=next;$('preview').hidden=false;$('empty').hidden=true;if(blobUrl)URL.revokeObjectURL(blobUrl);blobUrl=next;}catch(_){$('preview').hidden=true;$('empty').hidden=false;$('empty').querySelector('p').textContent='等待摄像头的新画面';}}

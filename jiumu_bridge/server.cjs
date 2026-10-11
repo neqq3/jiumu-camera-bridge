@@ -5,6 +5,7 @@ const {CameraSession}=require('./lib/session.cjs');
 const {network,identity}=require('./lib/hlp-crypto.cjs');
 const {isLan}=require('./lib/hlp-client.cjs');
 const {frigateInputArgs,mediaSources}=require('./lib/transcode.cjs');
+const {SetupError,setupResponse}=require('./lib/setup-errors.cjs');
 process.umask(0o077);
 const dataDir=process.env.DATA_DIR||'/data';fs.mkdirSync(dataDir,{recursive:true,mode:0o700});fs.chmodSync(dataDir,0o700);
 const file=path.join(dataDir,'bridge.json');
@@ -80,31 +81,33 @@ const api=http.createServer(async(req,res)=>{
     if(req.method==='POST'&&route==='/api/login') {
       if(loginBusy||Date.now()-lastLogin<10000)return json(res,429,{error:'请等待上次登录完成，稍后重试'});
       const input=await body(req);
-      if(typeof input.account!=='string'||typeof input.password!=='string'||input.account.length>256||input.password.length>256)throw new Error('账号或密码格式错误');
+      if(typeof input.account!=='string'||typeof input.password!=='string'||!input.account.trim()||!input.password||input.account.length>256||input.password.length>256)throw new SetupError('account_input');
       loginBusy=true;lastLogin=Date.now();
       try {
         const devices=await require('./lib/onboarding.cjs').onboard(input.account.trim(),input.password);input.password='';
         const ticket=crypto.randomBytes(24).toString('hex');pending.clear();pending.set(ticket,{devices,expires:Date.now()+600000});
-        return json(res,200,{ticket,devices:devices.map((d,index)=>({index,name:d.name,supported:d.supported}))});
-      } catch(_){return json(res,502,{error:'登录或设备列表获取失败，请核对账号密码、厂商服务和外网连接'});}finally{loginBusy=false;input.password='';}
+        return json(res,200,{ticket,devices:devices.map((d,index)=>({index,name:d.name,supported:d.supported,...(!d.supported?{reason:d.reason}:{} )}))});
+      } catch(error){return json(res,502,setupResponse(error,'cloud_response'));}finally{loginBusy=false;input.password='';}
     }
     if(req.method==='POST'&&route==='/api/select') {
       const input=await body(req),entry=pending.get(input.ticket);
-      if(!entry||entry.expires<Date.now())throw new Error('登录结果已过期，请重新登录');
-      if(!Array.isArray(input.indices)||!input.indices.length||input.indices.length>4||new Set(input.indices).size!==input.indices.length)throw new Error('请选择 1 至 4 台摄像头');
+      if(!entry||entry.expires<Date.now())throw new SetupError('login_expired');
+      if(!Array.isArray(input.indices)||!input.indices.length||input.indices.length>4||new Set(input.indices).size!==input.indices.length)throw new SetupError('selection');
       const next=input.indices.map(index=>{
-        const d=entry.devices[index];if(!Number.isInteger(index)||!d?.supported||!d.config)throw new Error('该摄像头暂不支持');
+        const d=entry.devices[index];if(!Number.isInteger(index)||!d?.supported||!d.config)throw new SetupError('device_unavailable');
         network(d.config.server);identity(d.config.did);
-        const ipHint=String(input.ipHints?.[index]||'');if(ipHint&&!isLan(ipHint))throw new Error('摄像头 IP 必须是局域网 IPv4 地址');
+        const ipHint=String(input.ipHints?.[index]||'');if(ipHint&&!isLan(ipHint))throw new SetupError('ip_hint');
         return {id:'camera_'+crypto.createHash('sha256').update(d.config.did).digest('hex').slice(0,8),name:String(d.name).slice(0,100),
           config:{did:d.config.did,server:d.config.server,user:d.config.user,password:d.config.password},ipHint};
       });
-      state={...state,cameras:next};atomic('bridge.json',JSON.stringify(state,null,2));
+      const nextState={...state,cameras:next};
+      try{atomic('bridge.json',JSON.stringify(nextState,null,2));}catch(_){throw new SetupError('save_failed');}
+      state=nextState;
       for(const s of sessions.values())s.stop();sessions.clear();for(const c of state.cameras)startCamera(c);
       pending.clear();refreshGo();return json(res,200,{saved:next.length});
     }
     json(res,404,{error:'没有此接口'});
-  } catch(_){json(res,400,{error:'请求无效或配置保存失败，请重新登录并选择摄像头'});}
+  } catch(error){json(res,400,setupResponse(error));}
 });
 api.requestTimeout=40000;api.headersTimeout=15000;api.listen(port,'0.0.0.0');
 const media=http.createServer((req,res)=>{
