@@ -4,7 +4,7 @@ const {spawn}=require('node:child_process');
 const {CameraSession}=require('./lib/session.cjs');
 const {network,identity}=require('./lib/hlp-crypto.cjs');
 const {isLan}=require('./lib/hlp-client.cjs');
-const {videoInput,videoFilter,audioInput,frigateInputArgs}=require('./lib/transcode.cjs');
+const {frigateInputArgs,mediaSources}=require('./lib/transcode.cjs');
 process.umask(0o077);
 const dataDir=process.env.DATA_DIR||'/data';fs.mkdirSync(dataDir,{recursive:true,mode:0o700});fs.chmodSync(dataDir,0o700);
 const file=path.join(dataDir,'bridge.json');
@@ -32,12 +32,11 @@ function startCamera(c){network(c.config.server);identity(c.config.did);sessions
 function goConfig() {
   const streams={};for(const c of state.cameras) {
     const base=`http://127.0.0.1:${mediaPort}/cameras/${c.id}`;
-    streams[c.id]=[`ffmpeg:${base}/stream.mjpeg#input=jiumu#video=h264#raw=-vf ${videoFilter} -threads:v 2 -g:v 20`,
-      `ffmpeg:${base}/audio.wav#input=jiumu_audio#audio=aac#audio=opus`];
+    streams[c.id]=mediaSources(base);
   }
   // JSON is also valid YAML. Credentials stay in the private data volume.
   return JSON.stringify({api:{listen:`127.0.0.1:${goApiPort}`},rtsp:{listen:`:${rtspPort}`,...state.rtsp},
-    webrtc:{listen:''},streams,ffmpeg:{jiumu:videoInput,jiumu_audio:audioInput},log:{level:'error'}},null,2);
+    webrtc:{listen:''},streams,log:{level:'error'}},null,2);
 }
 function startGo() {
   if(shutdown || process.env.DISABLE_GO2RTC==='1')return;
