@@ -1,9 +1,18 @@
 'use strict';
 const $=id=>document.getElementById(id);let token=sessionStorage.getItem('jiumu-admin')||'',ticket='',selected='',busy=false,blobUrl,localOnly=false;
 const msg=text=>{$('message').textContent=text;};
+async function readResponse(route,options={},format='json',timeoutMs=10000){
+ const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),timeoutMs);
+ try{const res=await fetch('api/'+route,{...options,signal:controller.signal});let data;
+  try{data=await res[format]();}catch(e){if(controller.signal.aborted)throw e;throw new Error('桥接服务返回异常，请稍后重试。');}
+  return {res,data};
+ }catch(e){if(controller.signal.aborted)throw new Error('请求超时，请检查桥接服务后重试。');throw e;}finally{clearTimeout(timer);}
+}
 async function api(route,body) {
- const res=await fetch('api/'+route,{method:body?'POST':'GET',headers:{Authorization:'Bearer '+token,'Content-Type':'application/json','X-Jiumu-Request':'1'},body:body?JSON.stringify(body):undefined});
- let data;try{data=await res.json();}catch(_){throw new Error('桥接服务返回异常，请稍后重试。');}if(!res.ok){const error=new Error(data.error||'连接失败，请重试');error.code=data.code;throw error;}return data;
+ // Account lookup/login/listing have a combined server budget of 55 seconds.
+ // Include body consumption in the deadline; never retry a mutation implicitly.
+ const {res,data}=await readResponse(route,{method:body?'POST':'GET',headers:{Authorization:'Bearer '+token,'Content-Type':'application/json','X-Jiumu-Request':'1'},body:body?JSON.stringify(body):undefined},'json',route==='login'?65000:10000);
+ if(!res.ok){const error=new Error(data.error||'连接失败，请重试');error.code=data.code;throw error;}return data;
 }
 function lock(form,value){form.querySelectorAll('button').forEach(b=>b.disabled=value);}
 $('unlock').onsubmit=async e=>{e.preventDefault();token=$('key').value;try{await api('status');sessionStorage.setItem('jiumu-admin',token);$('key').value='';$('unlock').hidden=true;msg('');await refresh();}catch(e){msg(e.message);}};
@@ -21,7 +30,7 @@ $('choose').onsubmit=async e=>{e.preventDefault();const indices=[...$('devices')
  try{await api('select',{ticket,indices,ipHints});$('choose').hidden=true;ticket='';msg('已保存，正在通过局域网连接。');await refresh();}catch(e){msg(e.message);if(e.code==='login_expired'){ticket='';$('choose').hidden=true;$('login').hidden=false;}}finally{lock($('choose'),false);}};
 $('back').onclick=()=>{$('choose').hidden=true;$('login').hidden=false;};
 $('replace').onclick=()=>{$('login').hidden=false;$('choose').hidden=true;$('account').focus();};
-async function preview(){if(!selected)return;try{const r=await fetch('api/snapshot/'+selected,{headers:{Authorization:'Bearer '+token}});if(!r.ok)throw new Error();const next=URL.createObjectURL(await r.blob());$('preview').src=next;$('preview').hidden=false;$('empty').hidden=true;if(blobUrl)URL.revokeObjectURL(blobUrl);blobUrl=next;}catch(_){$('preview').hidden=true;$('empty').hidden=false;$('empty').querySelector('p').textContent='等待摄像头的新画面';}}
+async function preview(){if(!selected)return;try{const {res,data}=await readResponse('snapshot/'+selected,{headers:{Authorization:'Bearer '+token}},'blob',5000);if(!res.ok)throw new Error();const next=URL.createObjectURL(data);$('preview').src=next;$('preview').hidden=false;$('empty').hidden=true;if(blobUrl)URL.revokeObjectURL(blobUrl);blobUrl=next;}catch(_){$('preview').hidden=true;$('empty').hidden=false;$('empty').querySelector('p').textContent='等待摄像头的新画面';}}
 async function refresh(){if(busy||!$('unlock').hidden)return;busy=true;try{
  const s=await api('status');$('outputs').hidden=!s.cameras.length;$('saved').hidden=!s.cameras.length||!$('login').hidden||!$('choose').hidden;
  $('local-mode').hidden=!localOnly;$('local-empty').hidden=!localOnly||!!s.cameras.length;$('replace').hidden=localOnly;
@@ -35,4 +44,4 @@ $('host').value=location.hostname;
 $('export').onclick=async()=>{try{const data=await api('export?host='+encodeURIComponent($('host').value));$('exports').replaceChildren();for(const c of data.cameras){const details=document.createElement('details'),summary=document.createElement('summary');summary.textContent=c.name+' · 接入配置（含本地取流密码）';details.append(summary);
  const tip=document.createElement('p');tip.className='help';tip.textContent='Frigate：合并下面的 go2rtc 与 cameras 条目，保留原有配置。HA：添加 Generic Camera，将 RTSP 地址填入流来源，选择 TCP。';details.append(tip);
  for(const [label,value,cls]of [['RTSP 地址',c.rtsp,'rtsp'],['Frigate 配置',c.frigate,'']]){const text=document.createElement('textarea');text.readOnly=true;text.value=value;text.className=cls;text.setAttribute('aria-label',label);details.append(text);const copy=document.createElement('button');copy.className='secondary';copy.textContent='复制'+label;copy.onclick=async()=>{try{await navigator.clipboard.writeText(value);msg('已复制'+label);}catch(_){text.select();msg('浏览器不允许自动复制，已选中内容，请手动复制。');}};details.append(copy);}$('exports').append(details);}}catch(e){msg(e.message);}};
-(async()=>{try{const m=await(await fetch('api/mode')).json();localOnly=m.local_only===true;if(m.ingress)$('host').value='';$('unlock').hidden=m.ingress||!!token;if($('unlock').hidden)try{await api('status');await refresh();}catch(_){$('unlock').hidden=false;}setInterval(refresh,3000);}catch(_){msg('桥接服务无法访问，请检查服务是否已启动。');}})();
+(async()=>{try{const {res,data:m}=await readResponse('mode');if(!res.ok)throw new Error();localOnly=m.local_only===true;if(m.ingress)$('host').value='';$('unlock').hidden=m.ingress||!!token;if($('unlock').hidden)try{await api('status');await refresh();}catch(_){$('unlock').hidden=false;}setInterval(refresh,3000);}catch(_){msg('桥接服务无法访问，请检查服务后刷新页面重试。');}})();

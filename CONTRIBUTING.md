@@ -21,6 +21,14 @@ node --test --test-concurrency=1 scripts/onboarding.test.cjs scripts/onboarding-
 
 测试不会查询厂商 DNS 或登录厂商；慢响应使用回环 HTTP，仅验证总时限与连接清理，不代表 TLS 或真实账号验收。
 
+页面请求恢复测试执行实际页面脚本，使用合成 DOM、请求和可控时钟，检查登录响应挂起、预览挂起及状态恢复，不访问网络：
+
+```sh
+node --test scripts/setup-page-deadline.test.cjs
+```
+
+这项测试不能替代浏览器或 HAOS Ingress 实测。
+
 本地绑定服务的模拟客户端测试只使用本机回环地址，不访问摄像头或厂商：
 
 ```sh
