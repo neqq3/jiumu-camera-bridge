@@ -1,0 +1,8 @@
+# SPDX-License-Identifier: Apache-2.0
+configuration:
+  rtsp_port:
+    name: 本地 RTSP 端口
+    description: Frigate 或 Home Assistant 通过此端口取流。默认 18554；更改后需重新生成接入地址。
+  local_only:
+    name: 关闭厂商账号导入
+    description: 首次安装请保持关闭。完成设备导入后可启用，重启仍使用已保存的设备凭据；此选项不会阻止摄像头自身访问厂商云。

@@ -1,0 +1,8 @@
+# SPDX-License-Identifier: Apache-2.0
+configuration:
+  rtsp_port:
+    name: Local RTSP port
+    description: Used by Frigate or Home Assistant for streaming. Default 18554; regenerate connection URLs after changing this port.
+  local_only:
+    name: Disable vendor account import
+    description: Leave disabled for first setup. After importing a camera, enable to reuse stored device credentials without account import. This does not block the camera's own cloud connections.

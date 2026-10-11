@@ -10,6 +10,7 @@ const messages=Object.freeze({
   selection:'请选择 1 至 4 台可接入的摄像头。',
   device_unavailable:'这台摄像头缺少有效连接信息，请在官方 APP 确认绑定后重新获取列表。',
   ip_hint:'摄像头 IP 必须是局域网 IPv4 地址；也可以留空自动发现。',
+  export_host:'请填写运行桥接的主机局域网 IP 或主机名，不要填写完整网页 URL。',
   save_failed:'配置未能保存，请检查桥接数据目录的可写权限和剩余空间后重试。',
   request:'请求无效，请检查填写的内容后重试。'
 });

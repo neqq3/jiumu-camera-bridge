@@ -48,8 +48,8 @@ function startGo() {
 }
 function refreshGo(){if(goChild)goChild.kill('SIGTERM');else {clearTimeout(goTimer);startGo();}}
 function safeHost(value) {
-  const host=String(value||'').split(':')[0];
-  if(!/^[a-zA-Z0-9.-]+$/.test(host))throw new Error('请输入 Docker 或 HAOS 主机的局域网 IP');return host;
+  const valueString=String(value||'').trim();
+  if(!/^[a-zA-Z0-9.-]+(?::\d{1,5})?$/.test(valueString))throw new SetupError('export_host');return valueString.split(':')[0];
 }
 function exportsFor(host) {
   const password=encodeURIComponent(state.rtsp.password),user=encodeURIComponent(state.rtsp.username);
@@ -75,7 +75,7 @@ const api=http.createServer(async(req,res)=>{
   if(localOnly&&['/api/login','/api/select'].includes(route))return json(res,403,{error:'仅本地模式已禁用厂商账号导入；现有摄像头凭据仍可用于局域网连接'});
   try {
     if(req.method==='GET'&&route==='/api/status')return json(res,200,{cameras:[...sessions.values()].map(s=>s.status()),rtsp_port:rtspPort,rtsp_ready:!!goChild});
-    if(req.method==='GET'&&route==='/api/export')return json(res,200,{cameras:exportsFor(safeHost(url.searchParams.get('host')||req.headers.host))});
+    if(req.method==='GET'&&route==='/api/export')return json(res,200,{cameras:exportsFor(safeHost(url.searchParams.get('host')??(ha?'':req.headers.host)))});
     const snap=/^\/api\/snapshot\/([a-z0-9_]+)$/.exec(route);
     if(req.method==='GET'&&snap){const s=sessions.get(snap[1]);if(!s)return json(res,404,{error:'摄像头不存在'});return s.serve(res,'snapshot.jpg');}
     if(req.method==='POST'&&route==='/api/login') {
