@@ -41,7 +41,8 @@ async function startBindingService(input, log = () => {}) {
   const store = openState(c.dataDir, {did: c.target.did, code: c.target.code, firmware: c.target.firmware, uid: c.target.uid ?? ''});
   const sockets = new Set();
   const stats = {httpAccepted: 0, tcpRegistered: 0, rejected: 0, bindingAttempts: 0, shadowSeen: 0};
-  let tcpPort, activeSession = null, stopping = false;
+  let tcpPort, activeSession = null, stopping = false, lastHeartbeat = null;
+  const disconnect = new WeakMap();
   // Only fixed names and protocol event numbers leave this service, never payloads or identifiers.
   const note = (event, details = {}) => { try { log({event, ...details}); } catch {} };
   const reject = (socket, reason = 'invalid_request') => { stats.rejected++; note('request_rejected', {reason}); socket.destroy(); };
@@ -60,13 +61,15 @@ async function startBindingService(input, log = () => {}) {
     let budgetAt = performance.now();
     const connectedAt=performance.now();let receivedAt=connectedAt,closeReason='peer_closed';
     const end=reason=>{closeReason=reason;socket.destroy();};
+    disconnect.set(socket,end);
+    let heartbeatLogAt=-Infinity;
     const absolute = setTimeout(() => end('unregistered_session_deadline'), c.sessionMs);
     let phaseTimer = setTimeout(() => end('registration_deadline'), c.deadlineMs);
     let partialTimer;
     socket.setNoDelay(true);
     socket.setTimeout(c.idleMs, () => end('idle_timeout'));
-    socket.on('end',()=>{closeReason='peer_end';});
-    socket.on('error',()=>{closeReason='peer_error';});
+    socket.on('end',()=>{if(closeReason==='peer_closed')closeReason='peer_end';});
+    socket.on('error',()=>{if(closeReason==='peer_closed')closeReason='peer_error';});
     socket.on('close', () => {
       if (activeSession === socket) activeSession = null;
       clearTimeout(absolute); clearTimeout(phaseTimer); clearTimeout(partialTimer);
@@ -89,10 +92,13 @@ async function startBindingService(input, log = () => {}) {
         // authenticated replacement can evict it; an unauthenticated socket
         // is bounded by the registration deadline and the TCP connection cap.
         if (activeSession && activeSession !== socket) {
-          activeSession.destroy(); note('authenticated_session_replaced');
+          disconnect.get(activeSession)('authenticated_replacement'); note('authenticated_session_replaced');
         }
         activeSession = socket;
-        registered = true; stats.tcpRegistered++; note('target_registered');
+        lastHeartbeat = null;
+        registered = true; stats.tcpRegistered++;
+        note('target_registered', Number.isInteger(body.onlineReason)&&body.onlineReason>=0&&body.onlineReason<=255
+          ? {onlineReason:body.onlineReason} : {});
         note(same(body.uid, c.target.uid) ? 'target_owner_matches' : 'target_owner_differs');
         // A healthy authenticated camera needs a persistent control connection.
         // Retain idle/partial/challenge deadlines and per-window traffic bounds,
@@ -106,7 +112,20 @@ async function startBindingService(input, log = () => {}) {
         }
         return;
       }
-      if (event === 0) { send(0, {}); return; }
+      if (event === 0) {
+        // Firmware heartbeat 0x3f4f4 exposes power state. Never log arbitrary
+        // payload fields: the registration carries identifiers and credentials.
+        const power={};
+        if(body.status==='active'||body.status==='sleep')power.status=body.status;
+        if(Number.isInteger(body.electricity)&&body.electricity>=0&&body.electricity<=100)power.batteryPercent=body.electricity;
+        if(body.charging===0||body.charging===1)power.charging=body.charging===1;
+        if(typeof body.voltage==='string'&&/^[1-6][0-9]{3}mv$/.test(body.voltage))power.voltageMv=Number(body.voltage.slice(0,-2));
+        if(Object.keys(power).length) {
+          lastHeartbeat={at:new Date().toISOString(),...power};
+          if(performance.now()-heartbeatLogAt>=15000){note('target_heartbeat',power);heartbeatLogAt=performance.now();}
+        }
+        send(0, {}); return;
+      }
       // A cached endpoint with an old token will be rejected; use fresh bootstrap, never bypass identity checks.
       if (event === 8) { note('hello_observed'); return; }
       if (event === 4) {
@@ -239,6 +258,7 @@ async function startBindingService(input, log = () => {}) {
   } catch (error) { await close(); throw error; }
   return {addresses: {http: server.address(), tcp: tcp.address()}, close,
     status: () => ({...stats, listening:tcp.listening&&server.listening, targetConnected:!!activeSession&&!activeSession.destroyed,
+      lastHeartbeat:lastHeartbeat?{...lastHeartbeat}:null,
       mode: c.mode, deliveryAttempted: store.attempted, cameraAccepted: false, videoVerified: false})};
 }
 module.exports = {startBindingService, validateConfig};

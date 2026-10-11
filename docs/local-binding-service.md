@@ -50,7 +50,7 @@ node jiumu_bridge/local-binding.cjs /path/to/private/binding.json
 node --test --test-timeout=20000 scripts/binding.test.cjs
 ```
 
-默认仅回环监听。LAN 试验需要显式 `allowLan: true`、绑定具体 LAN 地址、正确的单摄像头 `sourceIp` 和可达 `advertiseIp`；拒绝 `0.0.0.0` 和公网地址。配置和状态仅在本地保存，未加密；Linux 创建权限为文件 0600 / 目录 0700，Windows 必须靠目录 ACL 控制访问。日志只含事件名、计数及监听信息，不含请求正文、ID、uid、token 或密码。
+默认仅回环监听。LAN 试验需要显式 `allowLan: true`、绑定具体 LAN 地址、正确的单摄像头 `sourceIp` 和可达 `advertiseIp`；拒绝 `0.0.0.0` 和公网地址。配置和状态仅在本地保存，未加密；Linux 创建权限为文件 0600 / 目录 0700，Windows 必须靠目录 ACL 控制访问。日志只含事件名、计数、监听信息，以及白名单内的断线原因、时长、登记原因和电源状态；不含请求正文、ID、uid、token 或密码。电源状态会报告电量、是否充电及有效电压值，心跳日志最多每 15 秒一次；登记原因来自固件字段，不能直接当作硬件重启原因。
 
 状态目录不能随意清空。Linux 使用内核 `flock` 锁：即使工作进程被强制终止，锁也随进程退出释放，Docker 可以自动恢复；`binding.guard` 文件需要保留，不能通过删除它解决锁冲突。镜像启动依赖 `flock`，缺失时拒绝运行。旧版本留下的 `binding.lock` 不会被自动删除：升级前正常停止旧服务；若旧服务已经崩溃，需先确认没有旧进程使用该目录，再处理旧标记，保留 `binding-state.json`。非 Linux 仍使用旧标记机制，不承诺异常终止自动恢复。存在 `delivery-attempted` 时应先使用已保存的密码验证摄像头，不能靠删除状态重试改密。
 

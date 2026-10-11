@@ -307,6 +307,24 @@ test('authenticated reconnect replaces a half-open session; unknown clients cann
   replacement.send(0,{});assert.equal((await replacement.read()).event,0);
   assert.equal(s.status().bindingAttempts,0);
   assert.equal(s.logs.filter(x=>x.event==='authenticated_session_replaced').length,1);
+  for(let i=0;i<20&&!s.logs.some(x=>x.reason==='authenticated_replacement');i++)await delay(5);
+  assert.ok(s.logs.some(x=>x.event==='target_disconnected'&&x.reason==='authenticated_replacement'));
+});
+
+test('authenticated power diagnostics exclude private and malformed fields and rate-limit logs', async t => {
+  const s=await run(t,config(t)),token=await bootstrap(s),p=await client(t,s);
+  p.send(1,registration(token));await p.read();
+  const heartbeat={status:'active',electricity:76,voltage:'4090mv',charging:1,password:'DO-NOT-LOG',token:'PRIVATE-TOKEN',ssid:'PRIVATE-SSID'};
+  for(let i=0;i<3;i++){p.send(0,heartbeat);assert.deepEqual((await p.read()).body,{});}
+  assert.deepEqual(s.logs.filter(x=>x.event==='target_heartbeat'),[
+    {event:'target_heartbeat',status:'active',batteryPercent:76,charging:true,voltageMv:4090}]);
+  const saved=s.status().lastHeartbeat;
+  assert.ok(Number.isFinite(Date.parse(saved.at)));assert.equal(saved.voltageMv,4090);
+  p.send(0,{status:'PRIVATE-STATUS',electricity:'PRIVATE-VALUE',voltage:'4090mv PRIVATE',charging:{private:true}});await p.read();
+  assert.deepEqual(s.status().lastHeartbeat,saved);
+  assert.doesNotMatch(JSON.stringify([s.logs,s.status()]),/DO-NOT-LOG|PRIVATE/);
+  const replacement=await client(t,s);replacement.send(1,registration(token));await replacement.read();
+  assert.equal(s.status().lastHeartbeat,null);
 });
 
 test('state locks and failed listen cleanup', async t => {

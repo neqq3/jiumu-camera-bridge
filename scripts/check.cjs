@@ -17,6 +17,6 @@ for(const file of files){
   assert.ok(fs.existsSync(resolved),'Broken local link: '+path.relative(root,file));links++;
  }
 }
-const modules=['hlp-client','hlp-crypto','media','session','onboarding','onboarding_crypto','binding-codec','binding-lock','binding-state','binding-service'];
+const modules=['hlp-client','hlp-crypto','media','session','transcode','onboarding','onboarding_crypto','binding-codec','binding-lock','binding-state','binding-service'];
 for(const name of modules)require('../jiumu_bridge/lib/'+name+'.cjs');
 console.log(JSON.stringify({syntaxChecked:scripts,localLinksChecked:links,modulesLoaded:modules.length,networkAccess:false}));

@@ -14,8 +14,9 @@ class MediaParser {
       const length=this.buffer.readUInt32LE(16),type=this.buffer[4];
       if(length>MAX || length===0 || ![3,7].includes(type)){this.buffer=this.buffer.subarray(4);continue;}
       if(this.buffer.length<32+length)return;
+      const metadata={time_seconds:this.buffer.readUInt32LE(8),frame_index:this.buffer.readUInt32LE(12)};
       const body=this.buffer.subarray(32,32+length);this.buffer=this.buffer.subarray(32+length);
-      this.callback(type,body);
+      this.callback(type,body,metadata);
     }
   }
 }

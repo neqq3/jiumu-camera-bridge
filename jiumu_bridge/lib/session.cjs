@@ -11,7 +11,7 @@ class CameraSession {
     if(!this.running)return;
     this.state='connecting';this.started=Date.now();this.lastVideo=0;this.lastAudio=0;this.jpeg=null;
     this.sessionStartFrames=this.frames;
-    const parser=new MediaParser((type,body)=>{
+    const parser=new MediaParser((type,body,metadata)=>{
       if(type===3) {
         if(body.length<4 || body.readUInt16BE(0)!==0xffd8)return;
         // This firmware appends a short trailer after JPEG EOI (five bytes in
@@ -19,6 +19,7 @@ class CameraSession {
         const end=body.lastIndexOf(Buffer.from([0xff,0xd9]));
         if(end<2 || body.length-end>64)return;body=body.subarray(0,end+2);
         this.frames++;this.lastVideo=Date.now();this.jpeg=Buffer.from(body);this.state='streaming';
+        this.deviceVideo=metadata;
         const header=Buffer.from(`--frame\r\nContent-Type: image/jpeg\r\nContent-Length: ${body.length}\r\n\r\n`);
         this.broadcast(this.videoClients,Buffer.concat([header,body,Buffer.from('\r\n')]));
       } else if(type===7) {
@@ -32,7 +33,8 @@ class CameraSession {
     this.client.on('failure',message=>{
       this.error=message;
       this.lastFailure={at:new Date().toISOString(),reason:message,session_ms:Date.now()-this.started,
-        video_frames:this.frames-this.sessionStartFrames,protocol:{...this.client.stats},control:this.client.controlStatus()};
+        video_frames:this.frames-this.sessionStartFrames,device_video:this.deviceVideo?{...this.deviceVideo}:null,
+        protocol:{...this.client.stats},control:this.client.controlStatus()};
     });
     this.client.on('closed',()=>{
       clearInterval(this.watchdog);this.state='reconnecting';this.jpeg=null;
@@ -54,7 +56,8 @@ class CameraSession {
     const now=Date.now();return {id:this.camera.id,name:this.camera.name,state:this.state,
       fresh:!!this.lastVideo&&now-this.lastVideo<3000,audio_fresh:!!this.lastAudio&&now-this.lastAudio<3000,
       frames:this.frames,audio_frames:this.audioFrames,reconnects:this.reconnects,address:this.address||null,
-      last_frame_age_ms:this.lastVideo?now-this.lastVideo:null,last_failure:this.lastFailure||null,protocol:this.client.stats};
+      last_frame_age_ms:this.lastVideo?now-this.lastVideo:null,device_video:this.deviceVideo?{...this.deviceVideo}:null,
+      last_failure:this.lastFailure||null,protocol:this.client.stats};
   }
   serve(res,kind) {
     const s=this.status();if(!s.fresh || kind==='audio.wav'&&!s.audio_fresh){res.writeHead(503);res.end('Camera reconnecting');return;}
