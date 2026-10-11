@@ -49,4 +49,6 @@ docker restart jiumu-bridge
 
 源码已在 amd64 Docker 运行过；当时因镜像源拉取问题使用了本地已有基础镜像及媒体工具。仓库默认 Dockerfile 的完整联网构建、aarch64 构建尚待验证，详见 [验证记录](validation.md)。目前只准备源码，不提供预构建镜像。
 
+默认 Dockerfile 安装 Debian Bookworm 的 FFmpeg；已在隔离的 amd64 环境补测其 5.1.9 软件包，首次取流及音视频分别中断后的恢复均通过。该测试使用已有基础镜像，仍不能替代从零构建或 HAOS 安装验收。
+
 若构建在 `FROM` / 下载基础镜像阶段报告 `401 Unauthorized` 或连接重置，先核对 Docker 使用的镜像源及其访问状态。这发生在桥接程序启动之前，与九目账号密码无关。不要为了安装本项目直接替换整个 NAS 的 Docker 配置；已有镜像源可能也被其他服务使用。
