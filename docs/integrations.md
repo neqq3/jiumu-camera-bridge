@@ -17,8 +17,11 @@ cameras:
     ffmpeg:
       inputs:
         - path: rtsp://127.0.0.1:8554/my_camera
+          input_args: [-rtsp_transport, tcp, -timeout, "10000000", -use_wallclock_as_timestamps, "1"]
+          roles: [detect]
+        - path: rtsp://127.0.0.1:8554/my_camera
           input_args: preset-rtsp-restream
-          roles: [detect, record]
+          roles: [record]
       output_args:
         record: preset-record-generic-audio-copy
     detect:
@@ -30,6 +33,8 @@ cameras:
 ```
 
 分辨率和音轨示例对应本次测试的 A907-J；不同设备需重新验证。检测器、对象、人脸、MQTT、录像保留规则沿用你自己的设置。参考 [Frigate Restream](https://docs.frigate.video/configuration/restream/)。
+
+输入参数已在 Frigate 0.18 / FFmpeg 7 验证：检测输入使用接收时间，避免上游编码器重启后 RTP 时间戳跳变导致重复帧突增。合成测试覆盖同一 RTSP 连接上的多次上游重启；这项修复不代表摄像头本身断流已经解决。录像使用单独的同源输入保留编码时间戳，避免将接收抖动写入直接复制的视频轨；两个输入均由本地 restream 分发。其他版本需验证 `-timeout` 支持及录像时间。
 
 ## Home Assistant
 
