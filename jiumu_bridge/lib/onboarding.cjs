@@ -19,23 +19,32 @@ function signedHeaders(timestamp = Math.floor(Date.now()/1000), ran = crypto.ran
 function request(path, body) {
   const data = Buffer.from(JSON.stringify(body));
   return new Promise((resolve,reject) => {
+    let settled=false,deadline;
+    function finish(error,value) {
+      if(settled)return;settled=true;clearTimeout(deadline);
+      if(error)reject(error);else resolve(value);
+    }
     const req = https.request({hostname:'api-gateway-1.eye4cloud.com',path,method:'POST',
       headers:{...signedHeaders(),client_mark:'LANGXING',client_type:'1',client_number:'119',
         client_version:'1.0.12',oemid:'VSTC',country_code:'156',language:'zh',
         'content-type':'application/json','content-length':data.length}, timeout:15000}, res => {
       let length=0;const chunks=[];
-      res.on('data',b=>{length+=b.length;if(length>MAX_PACKET)res.destroy(new Error('Response too large'));else chunks.push(b);});
-      res.on('error',reject);
+      res.on('data',b=>{if(settled)return;length+=b.length;if(length>MAX_PACKET){finish(new SetupError('cloud_response'));res.destroy();req.destroy();}else chunks.push(b);});
+      res.on('error',()=>finish(new SetupError('cloud_unreachable')));
       res.on('end',()=>{
+        if(settled)return;
         try {
           const obj=JSON.parse(Buffer.concat(chunks).toString());
           if(res.statusCode!==200 || obj.code!==200) throw new SetupError('login_rejected');
-          resolve(obj.data);
-        } catch(e) {reject(e instanceof SetupError ? e : new SetupError('cloud_response'));}
+          finish(null,obj.data);
+        } catch(e) {finish(e instanceof SetupError ? e : new SetupError('cloud_response'));}
       });
     });
-    req.on('timeout',()=>req.destroy(new SetupError('cloud_unreachable')));
-    req.on('error',()=>reject(new SetupError('cloud_unreachable')));req.end(data);
+    function expire(){finish(new SetupError('cloud_unreachable'));req.destroy();}
+    // Socket inactivity does not bound DNS lookup or a response that keeps dripping bytes.
+    deadline=setTimeout(expire,15000);
+    req.on('timeout',expire);
+    req.on('error',()=>finish(new SetupError('cloud_unreachable')));req.end(data);
   });
 }
 function varint(number) {

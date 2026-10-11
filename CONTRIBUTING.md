@@ -13,6 +13,14 @@
 node scripts/check.cjs
 ```
 
+账号导入的离线测试使用合成数据，不需要厂商账号。时限测试包含两次约 15 秒等待，分别模拟 DNS 未返回和响应持续发送少量数据，整体约 30 秒：
+
+```sh
+node --test --test-concurrency=1 scripts/onboarding.test.cjs scripts/onboarding-deadline.test.cjs scripts/local-mode.test.cjs
+```
+
+测试不会查询厂商 DNS 或登录厂商；慢响应使用回环 HTTP，仅验证总时限与连接清理，不代表 TLS 或真实账号验收。
+
 本地绑定服务的模拟客户端测试只使用本机回环地址，不访问摄像头或厂商：
 
 ```sh
