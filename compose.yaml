@@ -1,12 +1,15 @@
 services:
   jiumu-bridge:
-    build:
-      context: ./jiumu_bridge
-    image: jiumu-bridge:0.1.0
+    image: ${JIUMU_IMAGE:-ghcr.io/neqq3/jiumu-camera-bridge:0.1.0-dev.1}
     container_name: jiumu-bridge
     network_mode: host
     restart: unless-stopped
     init: true
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     environment:
       LOCAL_ONLY: "${LOCAL_ONLY:-0}"
     security_opt:

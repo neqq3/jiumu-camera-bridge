@@ -14,7 +14,9 @@ Runtime builds obtain these separate components:
   components determine LGPL/GPL obligations. Preserve package copyright files
   and satisfy corresponding-source requirements when distributing images.
 
-No prebuilt image is published with this initial source candidate. A distributor
-must inventory the actual binary packages, versions, build options, upstream
-notices and corresponding sources. The bridge's Apache-2.0 license does not
+Private development images are built in GitHub Actions. The workflow records
+actual binary/source package versions, runtime build options and license texts.
+Before external distribution, corresponding sources and notices must also be
+retained and made available for that release; short-lived CI artifacts are not
+a replacement. The bridge's Apache-2.0 license does not
 replace the licenses of FFmpeg, Node, go2rtc or their dependencies.

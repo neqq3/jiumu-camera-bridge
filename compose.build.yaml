@@ -1,0 +1,6 @@
+# Developer override; ordinary installations pull the prebuilt image.
+services:
+  jiumu-bridge:
+    build:
+      context: ./jiumu_bridge
+    image: jiumu-bridge:local

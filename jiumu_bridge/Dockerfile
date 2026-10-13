@@ -1,7 +1,7 @@
 ARG NODE_BASE=node:24.21.0-bookworm-slim
 FROM ${NODE_BASE}
 ARG MEDIA_READY=0
-ARG BUILD_VERSION=0.1.0
+ARG BUILD_VERSION=0.1.0-dev.1
 ARG BUILD_ARCH="amd64|aarch64"
 LABEL io.hass.version="${BUILD_VERSION}" io.hass.type="app" io.hass.arch="${BUILD_ARCH}"
 RUN if [ "$MEDIA_READY" != 1 ]; then \
@@ -20,7 +20,10 @@ COPY public/ ./public/
 COPY server.cjs ./
 COPY licenses/ /usr/share/licenses/jiumu-camera-bridge/
 COPY THIRD_PARTY.md /usr/share/licenses/jiumu-camera-bridge/THIRD_PARTY.md
+# A source archive copied from Windows can carry owner-only modes. Keep public
+# code readable when a Docker user chooses to run the image as a non-root UID.
+RUN chmod -R a+rX /app /usr/share/licenses/jiumu-camera-bridge
 ENV NODE_ENV=production DATA_DIR=/data
 EXPOSE 18082 18554
-HEALTHCHECK --interval=30s --timeout=5s --start-period=20s CMD node -e "const n=require('net').connect(18082,'127.0.0.1',()=>{n.destroy();process.exit(0)});n.on('error',()=>process.exit(1))"
+HEALTHCHECK --interval=30s --timeout=5s --start-period=20s CMD ["node", "/app/lib/healthcheck.cjs"]
 CMD ["node","server.cjs"]

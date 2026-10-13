@@ -6,6 +6,7 @@ const {network,identity}=require('./lib/hlp-crypto.cjs');
 const {isLan}=require('./lib/hlp-client.cjs');
 const {frigateInputArgs,frigateRecordArgs,mediaSources}=require('./lib/transcode.cjs');
 const {SetupError,setupResponse}=require('./lib/setup-errors.cjs');
+const {probeRtsp}=require('./lib/rtsp-health.cjs');
 process.umask(0o077);
 const dataDir=process.env.DATA_DIR||'/data';fs.mkdirSync(dataDir,{recursive:true,mode:0o700});fs.chmodSync(dataDir,0o700);
 const file=path.join(dataDir,'bridge.json');
@@ -42,11 +43,26 @@ function goConfig() {
 function startGo() {
   if(shutdown || process.env.DISABLE_GO2RTC==='1')return;
   atomic('go2rtc.yaml',goConfig());
-  goChild=spawn(process.env.GO2RTC_BIN||'/usr/local/bin/go2rtc',['-config',path.join(dataDir,'go2rtc.yaml')],{stdio:'ignore'});
-  goChild.on('error',()=>console.error('RTSP service could not start; verify go2rtc installation'));
-  goChild.on('exit',()=>{goChild=null;if(!shutdown)goTimer=setTimeout(startGo,2000);});
+  const child=goChild=spawn(process.env.GO2RTC_BIN||'/usr/local/bin/go2rtc',['-config',path.join(dataDir,'go2rtc.yaml')],{stdio:'ignore'});
+  child.on('error',()=>console.error('RTSP service could not start; verify go2rtc installation'));
+  // Failed spawn emits error + close, but no exit. Retry that failure too.
+  child.on('close',()=>{if(goChild===child)goChild=null;if(!shutdown)goTimer=setTimeout(startGo,2000);});
 }
 function refreshGo(){if(goChild)goChild.kill('SIGTERM');else {clearTimeout(goTimer);startGo();}}
+function rtspReady() {
+  const child=goChild;
+  if(!child?.pid||child.exitCode!==null||child.signalCode!==null)return Promise.resolve(false);
+  const apiReady=new Promise(resolve=>{
+    let done=false;const finish=value=>{if(done)return;done=true;clearTimeout(timer);resolve(value);};
+    const request=http.get({hostname:'127.0.0.1',port:goApiPort,path:'/api/streams'},response=>{
+      response.resume();
+      finish(response.statusCode===200&&goChild===child&&child.exitCode===null&&child.signalCode===null);
+    });
+    const timer=setTimeout(()=>{finish(false);request.destroy();},700);
+    request.on('error',()=>finish(false));
+  });
+  return Promise.all([apiReady,probeRtsp(rtspPort)]).then(results=>results.every(Boolean));
+}
 function safeHost(value) {
   const valueString=String(value||'').trim();
   if(!/^[a-zA-Z0-9.-]+(?::\d{1,5})?$/.test(valueString))throw new SetupError('export_host');return valueString.split(':')[0];
@@ -74,7 +90,7 @@ const api=http.createServer(async(req,res)=>{
   if(req.method==='POST'&&req.headers['x-jiumu-request']!=='1')return json(res,403,{error:'请求来源验证失败'});
   if(localOnly&&['/api/login','/api/select'].includes(route))return json(res,403,{error:'仅本地模式已禁用厂商账号导入；现有摄像头凭据仍可用于局域网连接'});
   try {
-    if(req.method==='GET'&&route==='/api/status')return json(res,200,{cameras:[...sessions.values()].map(s=>s.status()),rtsp_port:rtspPort,rtsp_ready:!!goChild});
+    if(req.method==='GET'&&route==='/api/status')return json(res,200,{cameras:[...sessions.values()].map(s=>s.status()),rtsp_port:rtspPort,rtsp_ready:await rtspReady()});
     if(req.method==='GET'&&route==='/api/export')return json(res,200,{cameras:exportsFor(safeHost(url.searchParams.get('host')??(ha?'':req.headers.host)))});
     const snap=/^\/api\/snapshot\/([a-z0-9_]+)$/.exec(route);
     if(req.method==='GET'&&snap){const s=sessions.get(snap[1]);if(!s)return json(res,404,{error:'摄像头不存在'});return s.serve(res,'snapshot.jpg');}
@@ -111,6 +127,9 @@ const api=http.createServer(async(req,res)=>{
 });
 api.requestTimeout=40000;api.headersTimeout=15000;api.listen(port,'0.0.0.0');
 const media=http.createServer((req,res)=>{
+  // Installation readiness must work before an account/camera is imported.
+  // Camera freshness stays separate so an offline camera cannot cause restart loops.
+  if(req.url==='/ready')return rtspReady().then(ready=>json(res,ready?200:503,{ready}));
   if(req.url==='/health'){const items=[...sessions.values()].map(s=>s.status());return json(res,items.length&&items.every(s=>s.fresh&&s.audio_fresh)?200:503,{cameras:items});}
   const m=/^\/cameras\/([a-z0-9_]+)\/(snapshot.jpg|stream.mjpeg|audio.wav)$/.exec(req.url);
   if(!m||!sessions.has(m[1])){res.writeHead(404);res.end();return;}sessions.get(m[1]).serve(res,m[2]);

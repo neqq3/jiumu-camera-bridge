@@ -29,6 +29,15 @@ node --test scripts/setup-page-deadline.test.cjs
 
 这项测试不能替代浏览器或 HAOS Ingress 实测。
 
+从镜像验证首次安装与 RTSP 故障恢复（Linux Docker）：
+
+```sh
+docker build -t jiumu-install-candidate ./jiumu_bridge
+sh scripts/test-install.sh jiumu-install-candidate
+```
+
+脚本建立独立的 `network=none` 容器及空数据卷，检查未导入设备时的界面与 RTSP 就绪、实际停止 RTSP 子进程后的自动恢复、容器重启后凭据保留。每次检查最多 30 秒，结束后只清理自己创建的容器和卷；镜像保留供开发者继续测试。没有厂商请求、真实账号或摄像头访问。`container-smoke.cjs` 会主动结束测试容器内的 RTSP 子进程，禁止在正式容器中运行。
+
 本地绑定服务的模拟客户端测试只使用本机回环地址，不访问摄像头或厂商：
 
 ```sh

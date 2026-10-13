@@ -1,5 +1,6 @@
 name: Jiumu Local Bridge
-version: "0.1.0"
+version: "0.1.0-dev.1"
+image: ghcr.io/neqq3/jiumu-camera-bridge
 slug: jiumu_bridge
 description: 九目智联 A907-J 局域网音视频桥接，无需 Android 设备
 arch:

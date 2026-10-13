@@ -3,10 +3,11 @@
 
 本版要求摄像头已通过九目智联完成配网并绑定自己的账号。无账号首次配对还不能用于日常安装。
 
-在与摄像头同一局域网的 Linux 主机上取得本仓库源码，进入根目录运行：
+在与摄像头同一局域网的 Linux 主机上取得本仓库部署文件，进入根目录运行（开发候选镜像仍为私有，需先具备镜像读取权限；见[发布状态](releases.md)）：
 
 ```sh
-docker compose up -d --build
+docker compose pull
+docker compose up -d
 docker exec jiumu-bridge cat /data/admin-token
 ```
 
@@ -43,12 +44,16 @@ docker logs --tail 30 jiumu-bridge
 docker restart jiumu-bridge
 ```
 
+Compose 将本容器日志限制为每份 10 MB、最多 3 份，不会更改主机的全局日志设置。`docker compose ps` 的 `healthy` 表示管理进程和 RTSP 服务已就绪，首次尚未导入摄像头也可以是健康状态；摄像头画面、声音是否在线应在网页单独查看。RTSP 子进程退出或启动失败会自动重试，不会要求重新输入账号。
+
 保留数据卷以在重启后恢复设备。设备重置、解绑或凭据变化后可能需要重新导入。不要为了试验无账号配对而重置正在使用的设备。
 
 保存连接后，可在 Compose 所在目录的 `.env` 写入 `LOCAL_ONLY=1` 并执行 `docker compose up -d`，关闭厂商账号导入接口。恢复账号导入可设为 `0` 后重新创建容器；此设置不会解除摄像头的路由限制。两种模式都无需在日常启动时重新登录。参见 [启动与恢复验证](recovery.md)。
 
-源码已在 amd64 Docker 运行过；当时因镜像源拉取问题使用了本地已有基础镜像及媒体工具。仓库默认 Dockerfile 的完整联网构建、aarch64 构建尚待验证，详见 [验证记录](validation.md)。目前只准备源码，不提供预构建镜像。
+发布镜像由 GitHub Actions 构建，Docker 与 HAOS 共用。可在 `.env` 中设置 `JIUMU_IMAGE` 指定已通过测试的版本或摘要。开发者需要自行构建时使用 `docker compose -f compose.yaml -f compose.build.yaml up -d --build`；日常安装不需要构建工具。
 
-默认 Dockerfile 安装 Debian Bookworm 的 FFmpeg；已在隔离的 amd64 环境补测其 5.1.9 软件包，首次取流及音视频分别中断后的恢复均通过。该测试使用已有基础镜像，仍不能替代从零构建或 HAOS 安装验收。
+2026-10-14 补测了新镜像的空数据启动、重启保留凭据、RTSP 中断恢复，以及 UID 1000 运行；测试使用缓存依赖、隔离网络和临时数据卷。若自行指定非 root 用户，需先让该 UID 拥有 `data/`，不要将设备凭据目录设为所有人可读写。镜像中的公开程序文件已统一读取权限，兼容从 Windows 打包的源码。
+
+默认 Dockerfile 安装 Debian Bookworm 的 FFmpeg；已在隔离的 amd64 环境补测其 5.1.9 软件包，首次取流及音视频分别中断后的恢复均通过。2026-10-14 已在 HAOS amd64 使用默认 Dockerfile 安装并验证启动、Ingress、账号登录与设备列表；这不表示已验证 HAOS 的长期摄像头取流。
 
 若构建在 `FROM` / 下载基础镜像阶段报告 `401 Unauthorized` 或连接重置，先核对 Docker 使用的镜像源及其访问状态。这发生在桥接程序启动之前，与九目账号密码无关。不要为了安装本项目直接替换整个 NAS 的 Docker 配置；已有镜像源可能也被其他服务使用。

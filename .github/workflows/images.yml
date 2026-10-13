@@ -1,0 +1,125 @@
+name: Build and test container images
+
+on:
+  push:
+    branches: [main, 'dev/initial-import']
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: images-${{ github.ref }}
+  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
+
+jobs:
+  build:
+    name: Build and test (${{ matrix.arch }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-24.04
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 25
+    permissions:
+      contents: read
+      packages: write
+    env:
+      ARCH: ${{ matrix.arch }}
+      REF_TYPE: ${{ github.ref_type }}
+      REF_NAME: ${{ github.ref_name }}
+      REGISTRY_IMAGE: ghcr.io/${{ github.repository }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4
+      - name: Check version and build
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p results
+          VERSION=$(sed -n 's/^version: "\([^"]*\)"/\1/p' jiumu_bridge/config.yaml)
+          test -n "$VERSION"
+          if [ "$REF_TYPE" = tag ]; then test "$REF_NAME" = "v$VERSION"; fi
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+          docker buildx build --pull --load --platform "linux/$ARCH" \
+            --build-arg "BUILD_VERSION=$VERSION" \
+            --label "org.opencontainers.image.source=https://github.com/$GITHUB_REPOSITORY" \
+            --label "org.opencontainers.image.revision=$GITHUB_SHA" \
+            --label "org.opencontainers.image.version=$VERSION" \
+            --cache-from "type=gha,scope=runtime-$ARCH" \
+            --cache-to "type=gha,scope=runtime-$ARCH,mode=max" \
+            -t jiumu-ci:tested ./jiumu_bridge 2>&1 | tee results/build.log
+      - name: Isolated installation and recovery
+        shell: bash
+        run: |
+          set -euo pipefail
+          timeout --kill-after=10s 240s sh scripts/test-install.sh jiumu-ci:tested 2>&1 | tee results/install.log
+      - name: Synthetic protocol and real media regressions
+        shell: bash
+        run: |
+          set -euo pipefail
+          timeout --kill-after=10s 600s bash scripts/test-ci.sh jiumu-ci:tested 2>&1 | tee results/regression.log
+      - name: Record installed versions and licenses
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash scripts/image-inventory.sh jiumu-ci:tested results
+      - name: Push tested architecture
+        if: github.event_name != 'pull_request'
+        env:
+          REGISTRY_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          printf '%s' "$REGISTRY_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+          trap 'docker logout ghcr.io >/dev/null' EXIT
+          TARGET="$REGISTRY_IMAGE:sha-$GITHUB_SHA-$ARCH"
+          docker tag jiumu-ci:tested "$TARGET"
+          docker push "$TARGET"
+          docker image inspect "$TARGET" --format '{{json .RepoDigests}}' > results/image-digests.json
+      - name: Retain results (including failures)
+        if: always()
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: image-results-${{ matrix.arch }}
+          path: results/
+          retention-days: 14
+          if-no-files-found: error
+
+  manifest:
+    name: Publish tested multi-platform manifest
+    needs: build
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      packages: write
+    env:
+      REGISTRY_IMAGE: ghcr.io/${{ github.repository }}
+      REF_TYPE: ${{ github.ref_type }}
+      REF_NAME: ${{ github.ref_name }}
+    steps:
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4
+      - name: Publish only after both architectures pass
+        env:
+          REGISTRY_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          printf '%s' "$REGISTRY_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+          trap 'docker logout ghcr.io >/dev/null' EXIT
+          TAG="sha-$GITHUB_SHA"
+          # Version tags are created by a matching vX.Y.Z Git tag, never a branch push.
+          if [ "$REF_TYPE" = tag ]; then TAG="${REF_NAME#v}"; fi
+          docker buildx imagetools create -t "$REGISTRY_IMAGE:$TAG" \
+            "$REGISTRY_IMAGE:sha-$GITHUB_SHA-amd64" "$REGISTRY_IMAGE:sha-$GITHUB_SHA-arm64"
+          docker buildx imagetools inspect "$REGISTRY_IMAGE:$TAG" | tee -a "$GITHUB_STEP_SUMMARY"

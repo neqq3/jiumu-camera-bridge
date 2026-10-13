@@ -1,11 +1,11 @@
 <!-- SPDX-License-Identifier: CC-BY-4.0 -->
 # Home Assistant OS 加载项
 
-本加载项处于 experimental 阶段，尚未在 HAOS Supervisor 实机验证。amd64 Docker 验证不能替代 HAOS 安装验证。
+本加载项处于 experimental 阶段。2026-10-14 已在 HAOS amd64 实机安装并验证启动、Ingress、账号登录和设备列表；摄像头持续取流及 HAOS 长时间运行尚待单独验证。
 
-本地安装：将本仓库的 `jiumu_bridge` 目录复制到 HAOS 的 `/addons/jiumu_bridge/`，确保其中存在 `config.yaml`。刷新本地应用 / 加载项列表，安装 Jiumu Local Bridge，启动并打开 Web UI。
+加载项配置指向 GitHub Actions 预构建的 GHCR 镜像，HAOS 安装时只拉取匹配版本和架构的镜像，不负责编译。当前仓库与镜像仍私有，公开商店安装尚未开放；见[云端构建与发布状态](../docs/releases.md)。
 
-仓库根目录已有 `repository.yaml`，公开发布后可以将该 Git 仓库 URL 添加到应用商店。私有仓库阶段请使用本地安装方式；当前不承诺商店一键安装已验证。
+仓库根目录已有 `repository.yaml`，公开发布后可以将该 Git 仓库 URL 添加到应用商店。开发者可将 `jiumu_bridge` 目录复制到本地应用目录（部分终端加载项映射为 `/addons`），删除该副本 `config.yaml` 的 `image` 行后刷新商店，进行源码构建调试；普通用户不走这条开发路径。
 
 1. 设备先在九目智联完成 Wi-Fi 配网和账号绑定。
 2. 在桥接 Web UI 填账号密码，选择自己的摄像头并保存。
