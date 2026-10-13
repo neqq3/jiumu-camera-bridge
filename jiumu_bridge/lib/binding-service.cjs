@@ -17,11 +17,34 @@ function validateConfig(input) {
     deadlineMs: input.deadlineMs ?? 15000, sessionMs: input.sessionMs ?? 300000,
     idleMs: input.idleMs ?? 90000};
   const atom = (v, n) => typeof v === 'string' && v.length >= 1 && v.length <= n && /^[A-Za-z0-9.-]+$/.test(v);
+  // A separate mode avoids coupling privacy configuration to password/identity
+  // provisioning. Firmware 21.120.101.42 ignores the similarly named CGI setter.
+  if (c.mode === 'configure-alarm-upload') {
+    const p = c.alarmUpload;
+    if (c.arm !== true || c.target.firmware !== '21.120.101.42' || !atom(c.target.uid, 31) ||
+        !p || typeof p !== 'object' || Array.isArray(p) ||
+        Object.keys(p).some(k => !['enabled', 'version'].includes(k)) ||
+        typeof p.enabled !== 'boolean' || !Number.isInteger(p.version) || p.version < 1 || p.version > 0x7fffffff ||
+        c.allowP2pBootstrap === true || c.p2pBootstrap !== undefined) throw new Error('invalid_alarm_upload_policy');
+    c.alarmUpload = Object.freeze({enabled: p.enabled, version: p.version});
+  } else if (c.alarmUpload !== undefined) throw new Error('invalid_alarm_upload_policy');
+  // Address-only shadow update for an already owned camera. Deliberately cannot
+  // set DID, license, owner, password, detection or recording fields.
+  if (c.mode === 'configure-p2p-endpoint') {
+    const p=c.p2pEndpoint;
+    if(c.arm!==true || c.target.firmware!=='21.120.101.42' || !atom(c.target.uid,31) ||
+       !p || typeof p!=='object' || Array.isArray(p) ||
+       Object.keys(p).some(k=>!['address','version'].includes(k)) ||
+       typeof p.address!=='string' || !/^DAS-(?:[a-f0-9]{32})+$/i.test(p.address) || p.address.length>254 ||
+       !Number.isInteger(p.version) || p.version<1 || p.version>0x7fffffff ||
+       c.allowP2pBootstrap===true || c.p2pBootstrap!==undefined) throw new Error('invalid_p2p_endpoint_policy');
+    c.p2pEndpoint=Object.freeze({address:p.address,version:p.version});
+  } else if(c.p2pEndpoint!==undefined) throw new Error('invalid_p2p_endpoint_policy');
   if (c.p2pBootstrap !== undefined && (c.mode !== 'bind-once' || c.arm !== true || c.allowP2pBootstrap !== true ||
       !atom(c.p2pBootstrap.did, 23) || !atom(c.p2pBootstrap.license, 11) ||
       typeof c.p2pBootstrap.address !== 'string' || !/^DAS-[a-f0-9]+$/i.test(c.p2pBootstrap.address) || c.p2pBootstrap.address.length > 254 ||
       !Number.isInteger(c.p2pBootstrap.version) || c.p2pBootstrap.version < 1 || c.p2pBootstrap.version > 255)) throw new Error('invalid_p2p_bootstrap');
-  if (!['observe', 'bind-once'].includes(c.mode) || !localIPv4(c.listen) ||
+  if (!['observe', 'bind-once', 'configure-alarm-upload', 'configure-p2p-endpoint'].includes(c.mode) || !localIPv4(c.listen) ||
       !localIPv4(c.advertiseIp) || !localIPv4(c.target.sourceIp) ||
       !atom(c.target.did, 23) || !(atom(c.target.code, 23) || (c.target.code === undefined && c.learnCodeFromBootstrap === true)) ||
       !atom(c.target.firmware, 31) || typeof c.dataDir !== 'string' || !c.dataDir ||
@@ -42,6 +65,9 @@ async function startBindingService(input, log = () => {}) {
   const sockets = new Set();
   const stats = {httpAccepted: 0, tcpRegistered: 0, rejected: 0, bindingAttempts: 0, shadowSeen: 0};
   let tcpPort, activeSession = null, stopping = false, lastHeartbeat = null;
+  let alarmUploadState = c.alarmUpload ? 'awaiting_shadow' : null;
+  let alarmUploadDeliveries = 0, alarmUploadAcks = 0, lastShadowVersion = null;
+  let endpointState=c.p2pEndpoint?'awaiting_shadow':null,endpointDeliveries=0,endpointAcks=0;
   const disconnect = new WeakMap();
   // Only fixed names and protocol event numbers leave this service, never payloads or identifiers.
   const note = (event, details = {}) => { try { log({event, ...details}); } catch {} };
@@ -58,6 +84,8 @@ async function startBindingService(input, log = () => {}) {
   const tcp = net.createServer(socket => {
     if (!accept(socket)) return;
     let registered = false, challenge = null, allowed = false, sent = false, frames = 0, bytes = 0;
+    let alarmUploadSent = false, alarmUploadAcked = false;
+    let endpointSent=false,endpointAcked=false;
     let budgetAt = performance.now();
     const connectedAt=performance.now();let receivedAt=connectedAt,closeReason='peer_closed';
     const end=reason=>{closeReason=reason;socket.destroy();};
@@ -87,7 +115,7 @@ async function startBindingService(input, log = () => {}) {
         if (event !== 1) throw new Error('registration_required');
         if (!same(body.did, c.target.did) || !same(body.code, store.deviceCode) ||
             !same(body.version, c.target.firmware) || !same(body.token, store.token) ||
-            (c.mode === 'bind-once' && !same(body.uid, c.target.uid))) throw new Error('identity_mismatch');
+            (c.mode !== 'observe' && !same(body.uid, c.target.uid))) throw new Error('identity_mismatch');
         // A reboot may leave the old TCP connection half-open. Only a fully
         // authenticated replacement can evict it; an unauthenticated socket
         // is bounded by the registration deadline and the TCP connection cap.
@@ -96,6 +124,9 @@ async function startBindingService(input, log = () => {}) {
         }
         activeSession = socket;
         lastHeartbeat = null;
+        lastShadowVersion = null;
+        if (c.alarmUpload) alarmUploadState = 'awaiting_shadow';
+        if (c.p2pEndpoint) endpointState='awaiting_shadow';
         registered = true; stats.tcpRegistered++;
         note('target_registered', Number.isInteger(body.onlineReason)&&body.onlineReason>=0&&body.onlineReason<=255
           ? {onlineReason:body.onlineReason} : {});
@@ -132,7 +163,37 @@ async function startBindingService(input, log = () => {}) {
         // Echo existing settings by default. The explicit, firmware-specific lab profile
         // may initialize P2P after binding; never send unrelated desired settings.
         if (!Number.isInteger(body.version) || body.version < 0 || body.version > 0x7fffffff) throw new Error('invalid_shadow');
+        lastShadowVersion = body.version;
         stats.shadowSeen++; note(sent ? 'post_delivery_shadow_observed' : 'shadow_observed');
+        if(c.p2pEndpoint) {
+          const {address,version}=c.p2pEndpoint;
+          if(body.version<version && !endpointSent) {
+            send(4,{version,desired:{p2p:{address}}});
+            endpointSent=true;endpointDeliveries++;endpointState='sent_unverified';
+            note('p2p_endpoint_policy_sent',{version});
+          } else {
+            send(4,{version:body.version});
+            if(body.version>version || !endpointSent) endpointState=body.version===version?'version_matches_unverified':'newer_version_unverified';
+          }
+          return;
+        }
+        if (c.alarmUpload) {
+          const {enabled, version} = c.alarmUpload;
+          if (body.version < version && !alarmUploadSent) {
+            // Never include alarm.motion_enabled, p2p, work_mode, credentials,
+            // or recording settings: these have separate firmware side effects.
+            send(4, {version, desired: {isReport: enabled ? 1 : 0}});
+            alarmUploadSent = true; alarmUploadDeliveries++; alarmUploadState = 'sent_unverified';
+            note('alarm_upload_policy_sent', {enabled, version});
+          } else {
+            send(4, {version: body.version});
+            if (body.version > version || !alarmUploadSent) {
+              alarmUploadState = body.version === version ? 'version_matches_unverified' : 'newer_version_unverified';
+              note('alarm_upload_policy_not_sent', {reason: alarmUploadState});
+            }
+          }
+          return;
+        }
         if (c.p2pBootstrap && store.attempted && body.version < c.p2pBootstrap.version) {
           const {did, license, address, version} = c.p2pBootstrap;
           send(4, {version, desired: {p2p: {did, license, address}}});
@@ -144,6 +205,15 @@ async function startBindingService(input, log = () => {}) {
       // Firmware 0x3fc14 acknowledges the system shadow using event 7.
       if (event === 7) {
         if (!Number.isInteger(body.version) || body.version < 0 || body.version > 0x7fffffff) throw new Error('invalid_shadow_ack');
+        if(c.p2pEndpoint && endpointSent && !endpointAcked && body.version===c.p2pEndpoint.version && lastShadowVersion<=c.p2pEndpoint.version) {
+          endpointAcked=true;endpointAcks++;endpointState='acknowledged_unverified';
+          note('p2p_endpoint_policy_ack_observed',{version:body.version});
+        }
+        if (c.alarmUpload && alarmUploadSent && !alarmUploadAcked && body.version === c.alarmUpload.version &&
+            lastShadowVersion <= c.alarmUpload.version) {
+          alarmUploadAcked = true; alarmUploadAcks++; alarmUploadState = 'acknowledged_unverified';
+          note('alarm_upload_policy_ack_observed', {version: body.version});
+        }
         note('system_shadow_ack_observed'); return;
       }
       if (event === 2 && challenge && !sent && !allowed && same(body.code, challenge) && body.state === 'allow') {
@@ -259,6 +329,10 @@ async function startBindingService(input, log = () => {}) {
   return {addresses: {http: server.address(), tcp: tcp.address()}, close,
     status: () => ({...stats, listening:tcp.listening&&server.listening, targetConnected:!!activeSession&&!activeSession.destroyed,
       lastHeartbeat:lastHeartbeat?{...lastHeartbeat}:null,
+      lastShadowVersion,
+      p2pEndpointPolicy:c.p2pEndpoint?{version:c.p2pEndpoint.version,state:endpointState,deliveries:endpointDeliveries,acknowledgements:endpointAcks,deviceStateVerified:false}:null,
+      alarmUploadPolicy: c.alarmUpload ? {...c.alarmUpload, state: alarmUploadState,
+        deliveries: alarmUploadDeliveries, acknowledgements: alarmUploadAcks, deviceStateVerified: false} : null,
       mode: c.mode, deliveryAttempted: store.attempted, cameraAccepted: false, videoVerified: false})};
 }
 module.exports = {startBindingService, validateConfig};

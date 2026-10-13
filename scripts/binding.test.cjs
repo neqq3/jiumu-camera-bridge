@@ -378,3 +378,101 @@ test('HTTP slow header cannot extend its absolute deadline by sending bytes', as
   try { await closed; } finally { clearInterval(drip); }
   assert.equal(s.status().httpAccepted, 0);
 });
+
+test('alarm upload configuration requires a separate armed profile, exact firmware and owner', t => {
+  const c = config(t, {mode:'configure-alarm-upload', arm:true, alarmUpload:{enabled:false,version:12}});
+  assert.deepEqual(validateConfig(c).alarmUpload,{enabled:false,version:12});
+  for (const bad of [
+    {arm:false}, {mode:'observe'}, {mode:'bind-once'}, {allowP2pBootstrap:true},
+    {target:{...target,uid:''}}, {target:{...target,firmware:'other'}},
+    {alarmUpload:undefined}, {alarmUpload:{enabled:0,version:12}},
+    {alarmUpload:{enabled:false,version:0}}, {alarmUpload:{enabled:false,version:0x80000000}},
+    {alarmUpload:{enabled:false,version:12,desired:{p2p:{did:'OTHER'}}}},
+  ]) assert.throws(()=>validateConfig({...c,...bad}));
+});
+
+test('alarm upload policy only changes isReport, authenticates owner and treats ACK as unverified', async t => {
+  const c=config(t,{mode:'configure-alarm-upload',arm:true,alarmUpload:{enabled:false,version:12}});
+  const s=await run(t,c),token=await bootstrap(s),file=path.join(c.dataDir,'binding-state.json');
+  const before=fs.readFileSync(file);
+  const wrong=await client(t,s);wrong.send(1,registration(token,{uid:'wrong-owner'}));await wrong.closed;
+  assert.equal(wrong.queue.length,0);
+  const p=await client(t,s);p.send(1,registration(token));assert.equal((await p.read()).event,1);
+  p.send(7,{version:12});p.send(0,{});await p.read();
+  assert.equal(s.status().alarmUploadPolicy.acknowledgements,0);
+  p.send(4,{version:11});assert.deepEqual(await p.read(),{event:4,body:{version:12,desired:{isReport:0}}});
+  assert.equal(s.status().alarmUploadPolicy.state,'sent_unverified');
+  p.send(7,{version:11});p.send(0,{});await p.read();
+  assert.equal(s.status().alarmUploadPolicy.acknowledgements,0);
+  p.send(7,{version:12});p.send(7,{version:12});p.send(0,{});await p.read();
+  assert.equal(s.status().alarmUploadPolicy.state,'acknowledged_unverified');
+  assert.equal(s.status().alarmUploadPolicy.acknowledgements,1);
+  assert.equal(s.status().alarmUploadPolicy.deviceStateVerified,false);
+  p.send(4,{version:11});assert.deepEqual(await p.read(),{event:4,body:{version:11}});
+  p.send(4,{version:12});assert.deepEqual(await p.read(),{event:4,body:{version:12}});
+  assert.equal(s.status().alarmUploadPolicy.deliveries,1);
+  assert.equal(s.status().lastShadowVersion,12);
+  p.send(4,{version:13});assert.deepEqual(await p.read(),{event:4,body:{version:13}});
+  p.send(7,{version:12});p.send(0,{});await p.read();
+  assert.equal(s.status().alarmUploadPolicy.state,'newer_version_unverified');
+  assert.equal(s.status().bindingAttempts,0);assert.equal(s.status().deliveryAttempted,false);
+  assert.deepEqual(fs.readFileSync(file),before);
+  assert.doesNotMatch(JSON.stringify(s.logs),new RegExp(token));
+  // This mode cannot respond with a password even to a registered peer.
+  p.send(3,{code:'123456'});await p.closed;assert.equal(p.queue.length,0);
+});
+
+test('alarm upload policy survives service restart without rewriting equal/newer shadow versions', async t => {
+  const c=config(t,{mode:'configure-alarm-upload',arm:true,alarmUpload:{enabled:false,version:12}});
+  const s=await run(t,c),token=await bootstrap(s);await s.close();
+  const next=await run(t,c);assert.equal(await bootstrap(next),token);
+  const p=await client(t,next);p.send(1,registration(token));await p.read();
+  for(const version of [12,13]){
+    p.send(4,{version});assert.deepEqual(await p.read(),{event:4,body:{version}});
+    assert.equal(next.status().alarmUploadPolicy.state,version===12?'version_matches_unverified':'newer_version_unverified');
+  }
+  assert.equal(next.status().alarmUploadPolicy.deliveries,0);
+  assert.equal(next.status().alarmUploadPolicy.deviceStateVerified,false);
+});
+
+test('alarm upload rollback uses an explicit newer policy without rotating credentials', async t => {
+  const c=config(t,{mode:'configure-alarm-upload',arm:true,alarmUpload:{enabled:false,version:12}});
+  const first=await run(t,c),token=await bootstrap(first);await first.close();
+  const file=path.join(c.dataDir,'binding-state.json'),before=fs.readFileSync(file);
+  const restore=await run(t,{...c,alarmUpload:{enabled:true,version:13}});
+  const p=await client(t,restore);p.send(1,registration(token));await p.read();
+  p.send(4,{version:12});assert.deepEqual(await p.read(),{event:4,body:{version:13,desired:{isReport:1}}});
+  assert.equal(restore.status().bindingAttempts,0);assert.deepEqual(fs.readFileSync(file),before);
+});
+
+test('address-only endpoint mode rejects identity, mixed policies and malformed material',t=>{
+  const c=config(t,{mode:'configure-p2p-endpoint',arm:true,p2pEndpoint:{address:'DAS-'+('AB'.repeat(32)),version:9}});
+  assert.equal(validateConfig(c).p2pEndpoint.version,9);
+  for(const bad of [{arm:false},{mode:'observe'},{allowP2pBootstrap:true},{alarmUpload:{enabled:false,version:9}},
+    {target:{...target,uid:''}},{target:{...target,firmware:'other'}},
+    {p2pEndpoint:{...c.p2pEndpoint,did:'NEW-ID'}},{p2pEndpoint:{...c.p2pEndpoint,version:0}},
+    {p2pEndpoint:{...c.p2pEndpoint,address:'DAS-A'}},{p2pEndpoint:{...c.p2pEndpoint,address:'DAS-'+('AB'.repeat(128))}}])
+    assert.throws(()=>validateConfig({...c,...bad}));
+});
+
+test('endpoint change preserves credentials, requires owner, handles stale ACK and restart/rollback',async t=>{
+  const address='DAS-'+('AB'.repeat(32)),c=config(t,{mode:'configure-p2p-endpoint',arm:true,p2pEndpoint:{address,version:9}});
+  const s=await run(t,c),token=await bootstrap(s),file=path.join(c.dataDir,'binding-state.json'),before=fs.readFileSync(file);
+  const wrong=await client(t,s);wrong.send(1,registration(token,{uid:'wrong'}));await wrong.closed;assert.equal(wrong.queue.length,0);
+  const p=await client(t,s);p.send(1,registration(token));assert.equal((await p.read()).event,1);
+  p.send(7,{version:9});p.send(0,{});await p.read();assert.equal(s.status().p2pEndpointPolicy.acknowledgements,0);
+  p.send(4,{version:8});assert.deepEqual(await p.read(),{event:4,body:{version:9,desired:{p2p:{address}}}});
+  p.send(7,{version:8});p.send(0,{});await p.read();assert.equal(s.status().p2pEndpointPolicy.acknowledgements,0);
+  p.send(7,{version:9});p.send(7,{version:9});p.send(0,{});await p.read();assert.equal(s.status().p2pEndpointPolicy.acknowledgements,1);
+  p.send(4,{version:8});assert.deepEqual(await p.read(),{event:4,body:{version:8}});
+  assert.deepEqual(fs.readFileSync(file),before);assert.equal(s.status().bindingAttempts,0);
+  assert.equal(s.status().p2pEndpointPolicy.deviceStateVerified,false);assert.doesNotMatch(JSON.stringify(s.logs),new RegExp(address));
+  p.send(3,{code:'123456'});await p.closed;assert.equal(p.queue.length,0);await s.close();
+  const next=await run(t,c);assert.equal(await bootstrap(next),token);const q=await client(t,next);q.send(1,registration(token));await q.read();
+  for(const version of [9,10]){q.send(4,{version});assert.deepEqual(await q.read(),{event:4,body:{version}});}
+  assert.equal(next.status().p2pEndpointPolicy.deliveries,0);await next.close();
+  const restore=await run(t,{...c,p2pEndpoint:{address:'DAS-'+('CD'.repeat(32)),version:11}});
+  const r=await client(t,restore);r.send(1,registration(token));await r.read();r.send(4,{version:10});
+  assert.deepEqual(await r.read(),{event:4,body:{version:11,desired:{p2p:{address:'DAS-'+('CD'.repeat(32))}}}});
+  assert.deepEqual(fs.readFileSync(file),before);assert.equal(restore.status().bindingAttempts,0);
+});
