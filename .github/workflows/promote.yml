@@ -1,0 +1,75 @@
+name: Promote a tested development image
+
+on:
+  workflow_dispatch:
+    inputs:
+      build_run_id:
+        description: Successful image workflow run ID (both architectures)
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+  packages: write
+
+concurrency:
+  group: promote-image-version
+  cancel-in-progress: false
+
+jobs:
+  promote:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Verify the completed build
+        id: verified
+        env:
+          BUILD_RUN_ID: ${{ inputs.build_run_id }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import json, os, urllib.request
+          run_id = os.environ['BUILD_RUN_ID']
+          assert run_id.isdecimal(), 'Expected a numeric run ID'
+          repo = os.environ['GITHUB_REPOSITORY']
+          req = urllib.request.Request(f'https://api.github.com/repos/{repo}/actions/runs/{run_id}',
+              headers={'Authorization': 'Bearer '+os.environ['GH_TOKEN'], 'Accept': 'application/vnd.github+json'})
+          with urllib.request.urlopen(req, timeout=20) as r: run = json.load(r)
+          assert run['status'] == 'completed' and run['conclusion'] == 'success', 'Build has not passed'
+          assert run['path'] == '.github/workflows/images.yml', 'Wrong build workflow'
+          assert run['event'] in ['push', 'workflow_dispatch'], 'Pull-request builds cannot be promoted'
+          assert run['head_repository']['full_name'] == repo, 'Different source repository'
+          sha = run['head_sha']
+          assert len(sha) == 40 and all(c in '0123456789abcdef' for c in sha)
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as f: f.write(f'sha={sha}\n')
+          PY
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ steps.verified.outputs.sha }}
+          persist-credentials: false
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4
+      - name: Tag the existing tested digest without rebuilding
+        env:
+          TESTED_SHA: ${{ steps.verified.outputs.sha }}
+          REGISTRY_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION=$(sed -n 's/^version: "\([^"]*\)"/\1/p' jiumu_bridge/config.yaml)
+          # Development promotion only; public/stable release has a separate review.
+          [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+-dev\.[0-9]+$ ]]
+          IMAGE="ghcr.io/$GITHUB_REPOSITORY"
+          printf '%s' "$REGISTRY_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+          trap 'docker logout ghcr.io >/dev/null' EXIT
+          DIGEST=$(docker buildx imagetools inspect "$IMAGE:sha-$TESTED_SHA" --format '{{.Manifest.Digest}}')
+          [[ "$DIGEST" =~ ^sha256:[a-f0-9]{64}$ ]]
+          if docker buildx imagetools inspect "$IMAGE:$VERSION" --format '{{.Manifest.Digest}}' > existing.txt 2> lookup-error.txt; then
+            test "$(cat existing.txt)" = "$DIGEST" || { echo 'Version already points to another digest'; exit 1; }
+          else
+            grep -qi 'not found' lookup-error.txt || { cat lookup-error.txt; exit 1; }
+            docker buildx imagetools create --prefer-index=true -t "$IMAGE:$VERSION" "$IMAGE@$DIGEST"
+          fi
+          test "$(docker buildx imagetools inspect "$IMAGE:$VERSION" --format '{{.Manifest.Digest}}')" = "$DIGEST"
+          docker buildx imagetools inspect "$IMAGE:$VERSION" | tee -a "$GITHUB_STEP_SUMMARY"

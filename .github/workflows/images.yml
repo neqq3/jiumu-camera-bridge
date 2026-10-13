@@ -4,6 +4,11 @@ on:
   push:
     branches: [main, 'dev/initial-import']
     tags: ['v*']
+    paths:
+      - 'jiumu_bridge/**'
+      - 'scripts/**'
+      - 'compose*.yaml'
+      - '.github/workflows/images.yml'
   pull_request:
   workflow_dispatch:
 
