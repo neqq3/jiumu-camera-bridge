@@ -1,0 +1,46 @@
+name: Export a prebuilt development image
+
+on:
+  workflow_dispatch:
+    inputs:
+      digest:
+        description: Tested multi-platform manifest digest
+        required: true
+        default: sha256:88a919354f37bcc811538810572fe695c95f3e1eef539039e084267b4b82337e
+        type: string
+
+permissions:
+  contents: read
+  packages: read
+
+jobs:
+  export:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Pull exact existing amd64 image and export it
+        env:
+          IMAGE_DIGEST: ${{ inputs.digest }}
+          REGISTRY_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$IMAGE_DIGEST" =~ ^sha256:[a-f0-9]{64}$ ]]
+          IMAGE="ghcr.io/$GITHUB_REPOSITORY"
+          printf '%s' "$REGISTRY_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+          trap 'docker logout ghcr.io >/dev/null' EXIT
+          docker pull --platform linux/amd64 "$IMAGE@$IMAGE_DIGEST"
+          VERSION=$(docker inspect "$IMAGE@$IMAGE_DIGEST" --format '{{index .Config.Labels "io.hass.version"}}')
+          [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+-dev\.[0-9]+$ ]]
+          docker tag "$IMAGE@$IMAGE_DIGEST" "$IMAGE:$VERSION"
+          mkdir -p export
+          docker inspect "$IMAGE:$VERSION" > export/image.json
+          printf '%s\n' "$IMAGE_DIGEST" > export/manifest-digest.txt
+          docker save "$IMAGE:$VERSION" | gzip -1 > export/image-amd64.tar.gz
+          (cd export && sha256sum image-amd64.tar.gz image.json manifest-digest.txt > SHA256SUMS)
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: prebuilt-development-amd64
+          path: export/
+          compression-level: 0
+          retention-days: 3
