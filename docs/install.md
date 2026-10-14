@@ -3,9 +3,11 @@
 
 本版要求摄像头已通过九目智联完成配网并绑定自己的账号。无账号首次配对还不能用于日常安装。
 
-在与摄像头同一局域网的 Linux 主机上取得本仓库部署文件，进入根目录运行（开发候选镜像仍为私有，需先具备镜像读取权限；见[发布状态](releases.md)）：
+在与摄像头同一局域网的 Linux 主机上取得本仓库部署文件，进入根目录运行。开发预览镜像已公开，无需 GitHub 登录，也不用在安装主机编译；见[发布状态](releases.md)。
 
 ```sh
+git clone https://github.com/neqq3/jiumu-camera-bridge.git
+cd jiumu-camera-bridge
 docker compose pull
 docker compose up -d
 docker exec jiumu-bridge cat /data/admin-token

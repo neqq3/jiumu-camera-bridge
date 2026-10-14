@@ -3,9 +3,11 @@ name: Build and test container images
 on:
   push:
     branches: [main, 'dev/initial-import']
-    tags: ['v*']
+    # Release tags must not rebuild or replace a digest already tested/promoted.
+    # Publish development version tags with promote.yml after both builds pass.
     paths:
       - 'jiumu_bridge/**'
+      - '!jiumu_bridge/**/*.md'
       - 'scripts/**'
       - 'compose*.yaml'
       - '.github/workflows/images.yml'
@@ -123,8 +125,7 @@ jobs:
           printf '%s' "$REGISTRY_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
           trap 'docker logout ghcr.io >/dev/null' EXIT
           TAG="sha-$GITHUB_SHA"
-          # Version tags are created by a matching vX.Y.Z Git tag, never a branch push.
-          if [ "$REF_TYPE" = tag ]; then TAG="${REF_NAME#v}"; fi
+          # Only immutable source tags here; promote.yml owns development versions.
           docker buildx imagetools create -t "$REGISTRY_IMAGE:$TAG" \
             "$REGISTRY_IMAGE:sha-$GITHUB_SHA-amd64" "$REGISTRY_IMAGE:sha-$GITHUB_SHA-arm64"
           docker buildx imagetools inspect "$REGISTRY_IMAGE:$TAG" | tee -a "$GITHUB_STEP_SUMMARY"

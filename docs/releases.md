@@ -5,11 +5,11 @@ Docker 与 HAOS 使用同一个多架构镜像，安装主机负责运行，不�
 
 每个架构都先做空数据安装、RTSP 子进程故障恢复、容器重启和合成音视频回归。测试容器使用 `network=none`，不访问摄像头、家庭网络或厂商账号。构建作业最多 25 分钟，测试有独立时限，失败日志保留 14 天。
 
-分支构建通过后产生 `sha-完整提交号` 镜像。推送与加载项 `version` 相同的 `v版本号` Git 标签，可构建版本镜像；两种架构全部通过后才创建统一标签。`compose.yaml` 和加载项的 `image` 指向 GHCR，多架构清单会自动选择处理器架构。开发者仍可使用 `compose.build.yaml` 自行构建。
+分支构建通过后产生 `sha-完整提交号` 镜像，两种架构全部通过后才创建统一清单。发布 Git 标签不触发重建，避免把已经验证的版本替换为另一个摘要。`compose.yaml` 和加载项的 `image` 指向 GHCR，多架构清单会自动选择处理器架构。开发者仍可使用 `compose.build.yaml` 自行构建。
 
 开发版本也可通过 `promote.yml` 填入成功的构建 run ID，直接将已测试的相同镜像摘要标记为源码配置中的 `X.Y.Z-dev.N`。它会核对工作流、提交、完成状态与摘要，不重新构建，不允许覆盖指向其他摘要的已有版本，也不更改仓库或镜像可见性。
 
-当前仓库和镜像保持私有，`0.1.0-dev.2` 是开发候选，不是已公开的稳定版本。流水线成功、镜像存在和下载权限是安装前提。私有镜像需要 GHCR 读取权限，不能把此阶段称为普通用户免认证安装；公开发布后的加载项才适合在商店直接安装。不要将 GitHub 凭据填写到九目账号表单。
+仓库、GHCR 镜像和 [0.1.0-dev.2 预发布](https://github.com/neqq3/jiumu-camera-bridge/releases/tag/v0.1.0-dev.2)已于 2026-10-14 公开。镜像允许匿名拉取，Docker 和 HAOS 用户无需 GitHub 账号或令牌；这是开发预览，仍有摄像头偶发断流和自动重连，不能当作稳定版。不要将 GitHub 凭据填写到九目账号表单。
 
 `0.1.0-dev.2` 的[双架构构建](https://github.com/neqq3/jiumu-camera-bridge/actions/runs/38506380010)与[版本标记](https://github.com/neqq3/jiumu-camera-bridge/actions/runs/38507413905)均已成功。两个架构分别通过 4 项安装恢复检查、70 项回归，零失败、零跳过；新增检查覆盖端口被其他服务占用、释放后自动恢复。HAOS 默认 RTSP 端口改为 19554，已有安装请同步修改加载项选项。
 
@@ -18,7 +18,7 @@ ghcr.io/neqq3/jiumu-camera-bridge:0.1.0-dev.2
 sha256:53632d9b97b4c4ec5ea953a3353ef768cc93e88cb7ee45b21013474f664b9b08
 ```
 
-新版[对应源码收集](https://github.com/neqq3/jiumu-camera-bridge/actions/runs/38508032947)也已成功，附件 `runtime-sources-0.1.0-dev.2.tar.gz` 保存在该版本未发布的 Release 草稿中，SHA-256 为 `45edb8c3b6c813cceceba3ebe82fcaef404f519a957c220fad4c688c8cd78275`。收集和存储均在 GitHub 进行，没有在 NAS 或 HAOS 编译。
+新版[对应源码收集](https://github.com/neqq3/jiumu-camera-bridge/actions/runs/38508032947)也已成功，附件 `runtime-sources-0.1.0-dev.2.tar.gz` 和校验文件已随该版本公开，SHA-256 为 `45edb8c3b6c813cceceba3ebe82fcaef404f519a957c220fad4c688c8cd78275`。收集和存储均在 GitHub 进行，没有在 NAS 或 HAOS 编译。
 
 下面保留首版镜像及其对应源码记录；不同版本的源码材料需与各自镜像匹配，不能用首版材料冒充新版材料。
 
@@ -31,9 +31,9 @@ sha256:88a919354f37bcc811538810572fe695c95f3e1eef539039e084267b4b82337e
 
 镜像包含 Node 24.21.0、go2rtc 1.9.14、Debian FFmpeg 5.1.9-0+deb12u1。它证明云端构建和隔离运行成功，不表示已经完成从 GHCR 到 HAOS 的拉取更新或真实摄像头长测。
 
-`source-bundle.yml` 从这份镜像的两个架构读取实际包清单，收集准确版本的 Debian 源码、Node 源码、go2rtc 源码及其依赖，并保存校验和。[本次收集](https://github.com/neqq3/jiumu-camera-bridge/actions/runs/38504569522)已完成 213 个 Debian 源码包，材料保存于未发布的开发版 Release 草稿；没有公开仓库或镜像。
+`source-bundle.yml` 从这份镜像的两个架构读取实际包清单，收集准确版本的 Debian 源码、Node 源码、go2rtc 源码及其依赖，并保存校验和。[首版收集](https://github.com/neqq3/jiumu-camera-bridge/actions/runs/38504569522)已完成 213 个 Debian 源码包。dev.1 是历史调试版本；日常试用请选择具有公开对应源码附件的 dev.2。
 
-私有调试可用 `export-dev.yml` 导出已经构建、指定摘要的镜像，不重新编译。2026-10-14 已将校验后的 amd64 导出包导入 NAS，三个断网安装恢复检查全部通过，临时容器和数据卷已清理。`docker load` 的成功不等于 Supervisor 已通过私有 GHCR 的下载认证；普通加载项安装、更新仍需要可访问的镜像。
+离线调试可用 `export-dev.yml` 导出已经构建、指定摘要的镜像，不重新编译。公开前曾将校验后的 dev.1 amd64 导出包导入 NAS，三个断网安装恢复检查通过，临时容器和数据卷已清理。这个历史 `docker load` 测试与公开后的匿名下载验证分开记录。
 
 发布前核对：
 

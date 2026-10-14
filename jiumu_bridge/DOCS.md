@@ -3,9 +3,11 @@
 
 本加载项处于 experimental 阶段。2026-10-14 已在 HAOS amd64 实机安装并验证启动、Ingress、账号登录和设备列表；摄像头持续取流及 HAOS 长时间运行尚待单独验证。
 
-加载项配置指向 GitHub Actions 预构建的 GHCR 镜像，HAOS 安装时只拉取匹配版本和架构的镜像，不负责编译。当前仓库与镜像仍私有，公开商店安装尚未开放；见[云端构建与发布状态](../docs/releases.md)。
+加载项配置指向 GitHub Actions 预构建的 GHCR 镜像，HAOS 安装时只拉取匹配版本和架构的镜像，不负责编译。仓库和镜像已公开，无需 GitHub 账号或令牌；见[云端构建与发布状态](../docs/releases.md)。
 
-仓库根目录已有 `repository.yaml`，公开发布后可以将该 Git 仓库 URL 添加到应用商店。开发者可将 `jiumu_bridge` 目录复制到本地应用目录（部分终端加载项映射为 `/addons`），删除该副本 `config.yaml` 的 `image` 行后刷新商店，进行源码构建调试；普通用户不走这条开发路径。
+在个人资料中启用“高级模式”，然后进入“设置 → 加载项 → 加载项商店 → 菜单 → 仓库”，添加 `https://github.com/neqq3/jiumu-camera-bridge`。在 **Jiumu Camera Bridge** 仓库下安装 **Jiumu Local Bridge**，启动后打开 Web UI。开发预览标记为 `experimental`，未启用高级模式时商店可能隐藏它。
+
+开发者可将 `jiumu_bridge` 目录复制到本地应用目录（部分终端加载项映射为 `/addons`），删除该副本 `config.yaml` 的 `image` 行后刷新商店，进行源码构建调试；普通用户直接安装预构建版本。
 
 1. 设备先在九目智联完成 Wi-Fi 配网和账号绑定。
 2. 在桥接 Web UI 填账号密码，选择自己的摄像头并保存。
