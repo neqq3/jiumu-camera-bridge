@@ -14,6 +14,28 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  protocol:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - name: Install FFmpeg if absent
+        run: command -v ffmpeg || (sudo apt-get update && sudo apt-get install -y ffmpeg)
+      - name: Test sensor adapter and native RTSP on loopback
+        run: bash firmware/bk7252n/test-host.sh
+      - name: Keep text-only test evidence
+        if: always()
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f
+        with:
+          name: bk7252n-protocol-evidence
+          path: |
+            firmware-host-results/*.log
+            firmware-host-results/*.txt
+            firmware-host-results/*.json
+            firmware-host-results/*.framemd5
+          retention-days: 14
   compile:
     runs-on: ubuntu-22.04
     timeout-minutes: 20

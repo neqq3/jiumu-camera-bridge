@@ -13,7 +13,7 @@ tar -xJf sdk/toolchain/arm-none-eabi-gcc.tar.xz -C sdk/toolchain
 export ARM_GCC_TOOLCHAIN="$root/sdk/toolchain/arm-none-eabi/bin/"
 "${ARM_GCC_TOOLCHAIN}arm-none-eabi-gcc" --version > "$results/compiler-version.txt"
 python3 firmware/bk7252n/prepare-sdk.py
-git -C sdk diff -- application.mk > "$results/standalone-overlay.diff"
+git -C sdk diff -- application.mk beken378/app/config/sys_config_bk7252n.h beken378/func/camera_intf beken378/app/video_work/video_buffer.c > "$results/standalone-overlay.diff"
 set +e
 (cd sdk && timeout --kill-after=10s 600s make bk7252n -j2) 2>&1 | tee "$results/build.log"
 status=${PIPESTATUS[0]}
@@ -27,7 +27,7 @@ for name in bk7252n bk7231_bsp; do
   if [ -f "sdk/out/$name.map" ]; then cp "sdk/out/$name.map" "$results/"; fi
 done
 if [ "$status" = 0 ]; then
-  for symbol in video_buffer_open video_buffer_read_frame video_buffer_close camera_intfer_init; do
+  for symbol in video_buffer_open video_buffer_read_frame video_buffer_close camera_intfer_init sp0a39_init_candidate jpeg_parse rtp_jpeg_send research_rtsp_serve user_main; do
     if ! grep -Eq " [Tt] $symbol$" "$results/bk7252n-symbols.txt"; then
       printf 'Required implementation absent: %s\n' "$symbol" | tee -a "$results/symbol-validation.txt"
       status=1
