@@ -1,7 +1,7 @@
 <!-- SPDX-License-Identifier: CC-BY-4.0 -->
 # Home Assistant OS 加载项
 
-本加载项处于 experimental 阶段。2026-10-14 已在 HAOS amd64 实机安装并验证启动、Ingress、账号登录和设备列表；摄像头持续取流及 HAOS 长时间运行尚待单独验证。
+本加载项处于 experimental 阶段。2026-10-14 已在 HAOS amd64 从公开仓库直接安装 dev.2 预构建镜像，验证启动、Ingress、真实账号登录和设备列表，以及重启后服务和本地凭据保留；本次新安装保持空摄像头配置，长期取流仍待验证。
 
 加载项配置指向 GitHub Actions 预构建的 GHCR 镜像，HAOS 安装时只拉取匹配版本和架构的镜像，不负责编译。仓库和镜像已公开，无需 GitHub 账号或令牌；见[云端构建与发布状态](../docs/releases.md)。
 

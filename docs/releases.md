@@ -20,6 +20,10 @@ sha256:53632d9b97b4c4ec5ea953a3353ef768cc93e88cb7ee45b21013474f664b9b08
 
 新版[对应源码收集](https://github.com/neqq3/jiumu-camera-bridge/actions/runs/38508032947)也已成功，附件 `runtime-sources-0.1.0-dev.2.tar.gz` 和校验文件已随该版本公开，SHA-256 为 `45edb8c3b6c813cceceba3ebe82fcaef404f519a957c220fad4c688c8cd78275`。收集和存储均在 GitHub 进行，没有在 NAS 或 HAOS 编译。
 
+公开后的实际安装也已通过：Linux amd64 主机使用空 Docker 凭据配置匿名拉取，镜像摘要与上表一致；空数据启动、RTSP 子进程中断恢复、端口占用后的恢复、容器重启保留凭据四项检查均通过，临时容器和数据卷已清理。HAOS amd64 从该公开仓库直接安装预构建 dev.2，Supervisor 安装退出 0，Ingress、真实账号设备列表和重启检查通过。两条路线都没有在用户主机编译。HAOS 新实例保持空摄像头配置，已有主桥接继续取流；这些安装结果不替代长时间媒体验收。
+
+本次 NAS 首次下载较慢，原 300 秒、900 秒测试客户端分别超时；保留失败记录后，由有 1800 秒上限的客户端接续同一层下载并完成验证。下载慢不等于账号或镜像权限错误；可先查看实际 `docker pull` 输出，勿直接更改整个主机的镜像源或网络设置。
+
 下面保留首版镜像及其对应源码记录；不同版本的源码材料需与各自镜像匹配，不能用首版材料冒充新版材料。
 
 2026-10-14 已完成[首次双架构构建](https://github.com/neqq3/jiumu-camera-bridge/actions/runs/38441178397)：两个架构分别通过 3 项安装恢复检查及 70 项回归，零失败、零跳过。[开发版发布](https://github.com/neqq3/jiumu-camera-bridge/actions/runs/38442548312)直接沿用这次构建的摘要：
