@@ -83,14 +83,15 @@ static void client(int fd, uint32_t id, rtsp_frame_fn get_frame, void *ctx, uint
     size_t used=0;
     unsigned configured=0, playing=0;
     uint16_t seq=(uint16_t)id;
-    uint32_t last_input=now_ms(), last_frame=last_input, next_frame=last_input;
+    uint32_t last_input=now_ms(), last_frame=last_input, next_frame=last_input, request_started=last_input;
     snprintf(session,sizeof(session),"%08x",(unsigned)id);
     for (;;) {
         uint32_t now=now_ms();
-        if (now-last_input>30000 || (playing && now-last_frame>5000)) return;
+        if (now-last_input>30000 || (used && now-request_started>5000) || (playing && now-last_frame>5000)) return;
         if (ready(fd,0,playing?10:100)>0) {
             int count=recv(fd,input+used,sizeof(input)-1-used,0);
             if (count<=0) return;
+            if (!used) request_started=now;
             used+=(size_t)count; input[used]=0; last_input=now;
         }
         while (used) {
@@ -105,7 +106,7 @@ static void client(int fd, uint32_t id, rtsp_frame_fn get_frame, void *ctx, uint
                 size=((unsigned char)input[2]*256u)+(unsigned char)input[3];
                 if (input[1]!=1 || size>1024) return;
                 if (used<size+4) break;
-                memmove(input,input+size+4,used-size-4); used-=size+4; input[used]=0; continue;
+                memmove(input,input+size+4,used-size-4); used-=size+4; input[used]=0; request_started=now_ms(); continue;
             }
             end=strstr(input,"\r\n\r\n");
             if (!end) { if (memchr(input,0,used) || used==sizeof(input)-1) return; break; }
@@ -157,6 +158,7 @@ static void client(int fd, uint32_t id, rtsp_frame_fn get_frame, void *ctx, uint
             }
             if (rc) return;
             memmove(input,input+consumed,used-consumed); used-=consumed; input[used]=0;
+            request_started=now_ms();
         }
         if (playing && (int32_t)(now_ms()-next_frame)>=0) {
             jpeg_view view;

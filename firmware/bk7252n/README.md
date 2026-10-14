@@ -1,6 +1,6 @@
 # BK7252N firmware research
 
-This is a compile-only experiment toward a local RTSP application. It is not an
+This is an offline research implementation of a local RTSP application. It is not an
 A907-J replacement firmware and must not be installed on a camera.
 
 The first successful camera-API build and original-firmware SP0A39/pin/OTA
@@ -18,15 +18,40 @@ the hostname callback expected by its OpenBeken-modified lwIP port. It retains
 libc functions needed by LTO and explicitly links the real camera frame API;
 these functions are not replaced by success-returning test doubles.
 
-The SDK's GC0310 default does not identify the sensor fitted to any particular
-retail camera. Board-specific sensor, GPIO, flash layout, bootloader and recovery
-compatibility must be established independently before a hardware trial.
+The overlay now replaces the SDK's GC0310 default with a chip-ID-checked
+[SP0A39 candidate](SENSOR.md). It links a real SDK frame provider and a portable
+RTSP 1.0 / RTP-JPEG server: OPTIONS, DESCRIBE, SETUP, PLAY, GET_PARAMETER and
+TEARDOWN; one client; TCP interleaving; VGA delivery capped at 10 fps.
+JPEG parsing validates quantization and standard Huffman tables, supports
+4:2:2/4:2:0 baseline frames, and rejects unsupported scans and oversized frames.
+Buffers are capped at 64 KiB per frame, 2 KiB per request and 1400 bytes per
+packet. Partial requests expire after 5 seconds; writes after 2 seconds; a
+session with no valid fresh frame closes after 5 seconds.
+
+The research entry point waits for SDK initialization and starts the service on
+**loopback only**. It has no Wi-Fi onboarding, user authentication, audio, LAN
+enable switch or OTA endpoint yet. It is not a usable camera replacement.
+No household credentials or cloud endpoints are compiled in. Library code is
+not a packet capture: cloud-free operation on hardware remains untested.
+
+[Actions run 38589129001](https://github.com/neqq3/jiumu-camera-bridge/actions/runs/38589129001)
+compiled the adapter and actual frame/server implementations. An independent
+Linux job ran the same protocol C code with ASan/UBSan and synthetic FFmpeg
+input: two RTSP connections each decoded 12 VGA frames. This proves protocol
+interoperability, not sensor output, hardware performance, recovery or long-term
+stability. No real camera images are used by CI. The first implementation run
+failed; its diagnostics remain available alongside the successful retry.
+
+The linked image uses 440,548 bytes of text, 756 bytes of data and 101,664 bytes
+of BSS in that run. The 64 KiB frame buffer, SDK video pool, RTOS tasks and network
+buffers also consume heap. A successful link is not a runtime memory test.
 
 The public SDK contains precompiled radio/calibration libraries. Public source
 availability does not mean every component is open source or cleared for binary
 redistribution. The current experiment publishes text compilation evidence only.
 
-Next stages: identify the original board configuration, link the camera frame
-API in a minimal application, implement RTSP/RTP JPEG output with bounded memory,
-and establish a recoverable OTA migration path before any separately authorized
-flashing. There is currently no claim of hardware-tested native RTSP.
+The [OTA and recovery investigation](OTA-RECOVERY.md) describes what can and
+cannot be established without the installed bootloader. `ota_preflight.py`
+inspects a local stock-format RBL file without any device connection; passing
+its format checks always leaves `safe_to_flash` false. No firmware image or
+flasher is distributed by this workflow.

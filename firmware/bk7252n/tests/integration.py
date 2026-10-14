@@ -29,6 +29,12 @@ try:
     with connect() as s:
         s.sendall(b'X'*2047)
         assert s.recv(10)==b''
+    with connect() as s:
+        s.sendall(b'OPTIONS * RTSP/1.0\r\n')
+        s.settimeout(8)
+        started=time.monotonic()
+        assert s.recv(10)==b''
+        assert 4 < time.monotonic()-started < 7
     results=[]
     for i in range(2):
         dest=root/f'decoded-{i}.framemd5'
@@ -41,7 +47,7 @@ try:
         assert len(frames)==12
         results.append({'session':i,'decoded_frames':len(frames),'exit':run.returncode})
     assert server.poll() is None
-    (root/'integration.json').write_text(json.dumps({'source':'synthetic testsrc2','transport':'RTSP TCP / RTP JPEG','resolution':'640x480','sessions':results,'camera_contacted':False},indent=2))
+    (root/'integration.json').write_text(json.dumps({'source':'synthetic testsrc2','transport':'RTSP TCP / RTP JPEG','resolution':'640x480','sessions':results,'partial_request_deadline':'passed','camera_contacted':False},indent=2))
     print('Two independent FFmpeg sessions decoded 12 VGA frames each; malformed requests rejected.')
 finally:
     server.terminate()

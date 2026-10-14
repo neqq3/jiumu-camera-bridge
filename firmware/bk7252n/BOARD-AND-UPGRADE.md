@@ -98,9 +98,11 @@ The linker reports 432,328 bytes of text, 756 bytes of initialized data and
 The first run failed at link time; the second built but failed the required
 frame-buffer-symbol check. Both failures remain in Actions history.
 
-Next work is a board-specific SP0A39 adapter and a bounded RTSP/RTP-JPEG
-application with local configuration. The successful SDK build still uses its
-default sensor and demo application; it is not already a cloud-free RTSP image.
+The run above was the initial SDK/frame-API milestone and still used the SDK's
+default sensor. Subsequent work adds the [SP0A39 candidate adapter](SENSOR.md)
+and bounded RTSP/RTP-JPEG implementation; see [current build status](README.md)
+and the [OTA/recovery follow-up](OTA-RECOVERY.md). Local provisioning and
+hardware validation remain outstanding; this is not a deployable firmware.
 Before any separately authorized hardware trial, establish the original
 bootloader/partition contract and a recoverable migration path. Preserve the
 original bootloader and RF calibration unless independent evidence requires
