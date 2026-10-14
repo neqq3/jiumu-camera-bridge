@@ -1,0 +1,109 @@
+name: Prepare matching runtime sources
+
+on:
+  workflow_dispatch:
+    inputs:
+      digest:
+        description: Tested image manifest to accompany with source materials
+        required: true
+        default: sha256:88a919354f37bcc811538810572fe695c95f3e1eef539039e084267b4b82337e
+        type: string
+
+permissions:
+  contents: write
+  packages: read
+
+jobs:
+  sources:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Inspect the exact images without starting camera services
+        env:
+          DIGEST: ${{ inputs.digest }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$DIGEST" =~ ^sha256:[a-f0-9]{64}$ ]]
+          IMAGE="ghcr.io/$GITHUB_REPOSITORY@$DIGEST"
+          printf '%s' "$GH_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+          trap 'docker logout ghcr.io >/dev/null' EXIT
+          mkdir -p bundle
+          for ARCH in arm64 amd64; do
+            docker pull --platform "linux/$ARCH" "$IMAGE"
+            docker tag "$IMAGE" "jiumu-source-input:$ARCH"
+            ID=$(docker create --platform "linux/$ARCH" "jiumu-source-input:$ARCH")
+            docker cp "$ID:/var/lib/dpkg/status" "bundle/dpkg-status-$ARCH"
+            docker rm "$ID"
+            docker image inspect "jiumu-source-input:$ARCH" > "bundle/image-$ARCH.json"
+          done
+          VERSION=$(docker inspect jiumu-source-input:amd64 --format '{{index .Config.Labels "io.hass.version"}}')
+          REVISION=$(docker inspect jiumu-source-input:amd64 --format '{{index .Config.Labels "org.opencontainers.image.revision"}}')
+          [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+-dev\.[0-9]+$ ]]
+          [[ "$REVISION" =~ ^[a-f0-9]{40}$ ]]
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+          echo "REVISION=$REVISION" >> "$GITHUB_ENV"
+          printf '%s\n' "$DIGEST" > bundle/runtime-manifest-digest.txt
+          python3 scripts/source-package-list.py bundle
+          git archive --format=tar.gz "$REVISION" > bundle/jiumu-bridge-source.tar.gz
+          cp scripts/collect-debian-sources.sh scripts/source-package-list.py bundle/
+      - name: Download corresponding Debian source packages
+        shell: bash
+        run: |
+          set -euo pipefail
+          timeout --kill-after=10s 1800s docker run --rm --name jiumu-source-collector \
+            --memory 1g --pids-limit 128 -v "$PWD/bundle:/out" \
+            -v "$PWD/scripts/collect-debian-sources.sh:/collect.sh:ro" \
+            --entrypoint sh jiumu-source-input:amd64 /collect.sh
+      - name: Preserve Node and go2rtc sources and build information
+        shell: bash
+        run: |
+          set -euo pipefail
+          NODE_VERSION=$(docker run --rm --network none --entrypoint node jiumu-source-input:amd64 --version)
+          GO_VERSION=$(docker run --rm --network none --entrypoint go2rtc jiumu-source-input:amd64 --version | awk '{print $3}')
+          [[ "$NODE_VERSION" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          [[ "$GO_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          mkdir -p bundle/upstream
+          curl --fail --location --max-time 180 "https://nodejs.org/dist/$NODE_VERSION/node-$NODE_VERSION.tar.xz" -o "bundle/upstream/node-$NODE_VERSION.tar.xz"
+          curl --fail --location --max-time 30 "https://nodejs.org/dist/$NODE_VERSION/SHASUMS256.txt" -o bundle/upstream/node-SHASUMS256.txt
+          (cd bundle/upstream && grep " node-$NODE_VERSION.tar.xz$" node-SHASUMS256.txt | sha256sum -c -)
+          curl --fail --location --max-time 180 "https://github.com/AlexxIT/go2rtc/archive/refs/tags/v$GO_VERSION.tar.gz" -o "bundle/upstream/go2rtc-$GO_VERSION.tar.gz"
+          mkdir go2rtc-src
+          tar -xzf "bundle/upstream/go2rtc-$GO_VERSION.tar.gz" -C go2rtc-src --strip-components=1
+          (cd go2rtc-src && go mod vendor)
+          tar -czf bundle/upstream/go2rtc-with-dependencies.tar.gz -C go2rtc-src .
+          bash scripts/image-inventory.sh jiumu-source-input:amd64 bundle/inventory
+          cp docs/provenance.md jiumu_bridge/THIRD_PARTY.md bundle/
+          (cd bundle && find . -type f ! -name SHA256SUMS -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS)
+          tar -czf "runtime-sources-$VERSION.tar.gz" bundle
+          sha256sum "runtime-sources-$VERSION.tar.gz" > runtime-sources.sha256
+      - name: Save a private draft for review
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          printf '%s\n' 'Development preview; installation and source materials are prepared for review. Repository and package visibility are unchanged.' > release-notes.txt
+          if ! gh release view "v$VERSION" --json isDraft > existing-release.json 2> release-query.log; then
+            grep -qi 'not found' release-query.log || { cat release-query.log; exit 1; }
+            gh release create "v$VERSION" --draft --prerelease --target "$REVISION" --title "Jiumu Camera Bridge $VERSION" --notes-file release-notes.txt
+          fi
+          test "$(gh release view "v$VERSION" --json isDraft --jq .isDraft)" = true
+          gh release upload "v$VERSION" "runtime-sources-$VERSION.tar.gz" runtime-sources.sha256
+      - name: Save collection diagnostics
+        if: always()
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: source-collection-report
+          path: |
+            bundle/source-packages.tsv
+            bundle/missing-sources.tsv
+            bundle/debian/*/download.log
+            bundle/apt-update.log
+            runtime-sources.sha256
+          retention-days: 14
