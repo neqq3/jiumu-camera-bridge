@@ -20,6 +20,10 @@ sha256:88a919354f37bcc811538810572fe695c95f3e1eef539039e084267b4b82337e
 
 镜像包含 Node 24.21.0、go2rtc 1.9.14、Debian FFmpeg 5.1.9-0+deb12u1。它证明云端构建和隔离运行成功，不表示已经完成从 GHCR 到 HAOS 的拉取更新或真实摄像头长测。
 
+`source-bundle.yml` 从这份镜像的两个架构读取实际包清单，收集准确版本的 Debian 源码、Node 源码、go2rtc 源码及其依赖，并保存校验和。[本次收集](https://github.com/neqq3/jiumu-camera-bridge/actions/runs/38504569522)已完成 213 个 Debian 源码包，材料保存于未发布的开发版 Release 草稿；没有公开仓库或镜像。
+
+私有调试可用 `export-dev.yml` 导出已经构建、指定摘要的镜像，不重新编译。2026-10-14 已将校验后的 amd64 导出包导入 NAS，三个断网安装恢复检查全部通过，临时容器和数据卷已清理。`docker load` 的成功不等于 Supervisor 已通过私有 GHCR 的下载认证；普通加载项安装、更新仍需要可访问的镜像。
+
 发布前核对：
 
 1. Actions 中两个架构及清单作业均通过，下载本次 `image-results-*` 记录，核对镜像摘要。
