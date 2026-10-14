@@ -27,9 +27,15 @@ for name in bk7252n bk7231_bsp; do
 done
 if [ "$status" = 0 ]; then
   for symbol in video_buffer_open video_buffer_read_frame video_buffer_close camera_intfer_init; do
-    grep -Eq " [Tt] $symbol$" "$results/bk7252n-symbols.txt"
+    if ! grep -Eq " [Tt] $symbol$" "$results/bk7252n-symbols.txt"; then
+      printf 'Required implementation absent: %s\n' "$symbol" | tee -a "$results/symbol-validation.txt"
+      status=1
+    else
+      printf 'Linked implementation: %s\n' "$symbol" | tee -a "$results/symbol-validation.txt"
+    fi
   done
 fi
+printf '%s\n' "$status" > "$results/validation-exit.txt"
 if [ -f sdk/config/sys_config.h ]; then cp sdk/config/sys_config.h "$results/"; fi
 printf '## BK7252N compile-only research\n\nSDK: `%s`\n\nBuild exit: `%s`\n\nNo device access, flashing, deployment, or firmware release. A successful build does not establish A907-J board compatibility.\n' "$expected" "$status" >> "$GITHUB_STEP_SUMMARY"
 # Only text diagnostics are uploaded. No vendor dump, ELF or flashable image.

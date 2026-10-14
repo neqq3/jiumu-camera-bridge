@@ -13,6 +13,7 @@ marker = '-include ../../platforms/BK723x/OpenBeken.mk'
 assert text.count(marker) == 1
 text = text.replace(marker, '''# Standalone research overlay (not the OpenBeken application).
 SRC_C += ./fixes/blank.c
+SRC_C += ./beken378/app/video_work/video_buffer.c
 APP_C += ./research-hostname.c
 # Keep libc entry points needed by LTO-generated calls.
 LFLAGS += -Wl,-u,strchr -Wl,-u,strcpy
