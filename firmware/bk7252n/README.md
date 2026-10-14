@@ -3,6 +3,9 @@
 This is a compile-only experiment toward a local RTSP application. It is not an
 A907-J replacement firmware and must not be installed on a camera.
 
+The first successful camera-API build and original-firmware SP0A39/pin/OTA
+findings are recorded in [Board and upgrade findings](BOARD-AND-UPGRADE.md).
+
 The workflow builds a fixed public SDK revision on GitHub-hosted runners:
 [NonPIayerCharacter/beken_freertos_sdk, 1af1d4f](https://github.com/NonPIayerCharacter/beken_freertos_sdk/tree/1af1d4f549039bbecd7d07ffbbb7e24dc0bca57d).
 It preserves build failures, compiler identity, linker maps and symbol lists.

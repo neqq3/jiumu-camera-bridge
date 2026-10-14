@@ -8,6 +8,7 @@ expected=1af1d4f549039bbecd7d07ffbbb7e24dc0bca57d
 test "$(git -C sdk rev-parse HEAD)" = "$expected"
 git -C sdk rev-parse HEAD > "$results/sdk-commit.txt"
 sha256sum sdk/toolchain/arm-none-eabi-gcc.tar.xz > "$results/toolchain-sha256.txt"
+printf '%s  %s\n' '0e8867ab3db3b25bc05f6ea4c3bfa5efe9163b5570f48ff86b6243d8ca576df2' 'sdk/toolchain/arm-none-eabi-gcc.tar.xz' | sha256sum -c -
 tar -xJf sdk/toolchain/arm-none-eabi-gcc.tar.xz -C sdk/toolchain
 export ARM_GCC_TOOLCHAIN="$root/sdk/toolchain/arm-none-eabi/bin/"
 "${ARM_GCC_TOOLCHAIN}arm-none-eabi-gcc" --version > "$results/compiler-version.txt"
