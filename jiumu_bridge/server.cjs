@@ -6,7 +6,7 @@ const {network,identity}=require('./lib/hlp-crypto.cjs');
 const {isLan}=require('./lib/hlp-client.cjs');
 const {frigateInputArgs,frigateRecordArgs,mediaSources}=require('./lib/transcode.cjs');
 const {SetupError,setupResponse}=require('./lib/setup-errors.cjs');
-const {probeRtsp}=require('./lib/rtsp-health.cjs');
+const {probeRtsp,rtspPortAvailable}=require('./lib/rtsp-health.cjs');
 process.umask(0o077);
 const dataDir=process.env.DATA_DIR||'/data';fs.mkdirSync(dataDir,{recursive:true,mode:0o700});fs.chmodSync(dataDir,0o700);
 const file=path.join(dataDir,'bridge.json');
@@ -14,14 +14,14 @@ function atomic(name,value){const dest=path.join(dataDir,name);fs.writeFileSync(
 let options={};try{options=JSON.parse(fs.readFileSync(path.join(dataDir,'options.json')));}catch(_){}
 const ha=process.env.HA_INGRESS==='1',port=Number(process.env.PORT||18082),mediaPort=Number(process.env.MEDIA_PORT||18083);
 const localOnly=process.env.LOCAL_ONLY==='1'||options.local_only===true;
-const rtspPort=Number(process.env.RTSP_PORT||options.rtsp_port||18554),goApiPort=Number(process.env.GO2RTC_API_PORT||18084);
+const rtspPort=Number(process.env.RTSP_PORT||options.rtsp_port||(ha?19554:18554)),goApiPort=Number(process.env.GO2RTC_API_PORT||18084);
 let state=fs.existsSync(file)?JSON.parse(fs.readFileSync(file)):{version:1,cameras:[],rtsp:{username:'viewer',password:crypto.randomBytes(18).toString('hex')}};
 if(!fs.existsSync(file))atomic('bridge.json',JSON.stringify(state));
 const tokenFile=path.join(dataDir,'admin-token');
 if(!fs.existsSync(tokenFile))atomic('admin-token',crypto.randomBytes(24).toString('hex'));
 const adminToken=fs.readFileSync(tokenFile,'utf8').trim();
 fs.chmodSync(tokenFile,0o600);fs.chmodSync(file,0o600);
-const sessions=new Map(),pending=new Map();let shutdown=false,goChild,goTimer,loginBusy=false,lastLogin=0;
+const sessions=new Map(),pending=new Map();let shutdown=false,goChild,goTimer,goStarting=false,rtspError=null,loginBusy=false,lastLogin=0;
 function equal(a,b){const x=Buffer.from(a||''),y=Buffer.from(b||'');return x.length===y.length&&crypto.timingSafeEqual(x,y);}
 function json(res,code,value){res.writeHead(code,{'content-type':'application/json; charset=utf-8','cache-control':'no-store'});res.end(JSON.stringify(value));}
 function authorized(req){return ha?req.socket.remoteAddress==='172.30.32.2':equal(req.headers.authorization,'Bearer '+adminToken);}
@@ -40,8 +40,18 @@ function goConfig() {
   return JSON.stringify({api:{listen:`127.0.0.1:${goApiPort}`},rtsp:{listen:`:${rtspPort}`,...state.rtsp},
     webrtc:{listen:''},streams,log:{level:'error'}},null,2);
 }
-function startGo() {
-  if(shutdown || process.env.DISABLE_GO2RTC==='1')return;
+async function startGo() {
+  if(shutdown || goChild || goStarting || process.env.DISABLE_GO2RTC==='1')return;
+  goStarting=true;
+  const available=await rtspPortAvailable(rtspPort);
+  goStarting=false;
+  if(shutdown)return;
+  if(!available){
+    rtspError='port_in_use';
+    console.error('RTSP port is already in use; choose a free RTSP port in bridge options');
+    goTimer=setTimeout(startGo,5000);return;
+  }
+  rtspError=null;
   atomic('go2rtc.yaml',goConfig());
   const child=goChild=spawn(process.env.GO2RTC_BIN||'/usr/local/bin/go2rtc',['-config',path.join(dataDir,'go2rtc.yaml')],{stdio:'ignore'});
   child.on('error',()=>console.error('RTSP service could not start; verify go2rtc installation'));
@@ -90,7 +100,7 @@ const api=http.createServer(async(req,res)=>{
   if(req.method==='POST'&&req.headers['x-jiumu-request']!=='1')return json(res,403,{error:'请求来源验证失败'});
   if(localOnly&&['/api/login','/api/select'].includes(route))return json(res,403,{error:'仅本地模式已禁用厂商账号导入；现有摄像头凭据仍可用于局域网连接'});
   try {
-    if(req.method==='GET'&&route==='/api/status')return json(res,200,{cameras:[...sessions.values()].map(s=>s.status()),rtsp_port:rtspPort,rtsp_ready:await rtspReady()});
+    if(req.method==='GET'&&route==='/api/status')return json(res,200,{cameras:[...sessions.values()].map(s=>s.status()),rtsp_port:rtspPort,rtsp_ready:await rtspReady(),rtsp_error:rtspError});
     if(req.method==='GET'&&route==='/api/export')return json(res,200,{cameras:exportsFor(safeHost(url.searchParams.get('host')??(ha?'':req.headers.host)))});
     const snap=/^\/api\/snapshot\/([a-z0-9_]+)$/.exec(route);
     if(req.method==='GET'&&snap){const s=sessions.get(snap[1]);if(!s)return json(res,404,{error:'摄像头不存在'});return s.serve(res,'snapshot.jpg');}

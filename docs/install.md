@@ -33,6 +33,8 @@ docker exec jiumu-bridge cat /data/admin-token
 | 18083 | 内部媒体 | 127.0.0.1 |
 | 18084 | go2rtc 管理 API | 127.0.0.1 |
 
+上表为 Docker 默认值。HAOS 加载项默认 RTSP 使用 **19554**，因为 HA Core 自带 go2rtc 已使用 18554。旧加载项需手动修改 `rtsp_port` 并重新生成地址。Docker 与 HA Core 共用同一宿主网络时，也应通过 `RTSP_PORT` 选用空闲端口。端口冲突会显示错误并等待重试，无须重置摄像头或重新登录账号。
+
 管理页默认 HTTP；在不可信网络上输入账号前，应通过自己配置的 HTTPS 反向代理保护浏览器到桥接这一段。不要将服务直接暴露到公网。
 
 使用 host 网络接收 LAN 广播，不需要 privileged、USB 或蓝牙。初次无线配网另需能操作摄像头 AP / BLE 的设备，但取流主机可以有线联网。跨 VLAN、Windows Docker Desktop 广播及多摄像头并发尚未实测。

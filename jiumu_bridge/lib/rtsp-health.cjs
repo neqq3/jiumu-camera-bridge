@@ -1,6 +1,15 @@
 // SPDX-License-Identifier: Apache-2.0
 'use strict';
 const net=require('node:net');
+function rtspPortAvailable(port) {
+  return new Promise(resolve=>{
+    // Probe IPv4 explicitly: HA Core already owns loopback port 18554. An
+    // unrelated RTSP listener answering OPTIONS must not make us ready.
+    const server=net.createServer();
+    server.once('error',()=>resolve(false));
+    server.listen({host:'0.0.0.0',port,exclusive:true},()=>server.close(()=>resolve(true)));
+  });
+}
 function probeRtsp(port) {
   return new Promise(resolve=>{
     let done=false,head='';
@@ -16,4 +25,4 @@ function probeRtsp(port) {
     socket.on('error',()=>finish(false));socket.on('close',()=>finish(false));
   });
 }
-module.exports={probeRtsp};
+module.exports={probeRtsp,rtspPortAvailable};

@@ -33,6 +33,7 @@ $('replace').onclick=()=>{$('login').hidden=false;$('choose').hidden=true;$('acc
 async function preview(){if(!selected)return;try{const {res,data}=await readResponse('snapshot/'+selected,{headers:{Authorization:'Bearer '+token}},'blob',5000);if(!res.ok)throw new Error();const next=URL.createObjectURL(data);$('preview').src=next;$('preview').hidden=false;$('empty').hidden=true;if(blobUrl)URL.revokeObjectURL(blobUrl);blobUrl=next;}catch(_){$('preview').hidden=true;$('empty').hidden=false;$('empty').querySelector('p').textContent='等待摄像头的新画面';}}
 async function refresh(){if(busy||!$('unlock').hidden)return;busy=true;try{
  const s=await api('status');$('outputs').hidden=!s.cameras.length;$('saved').hidden=!s.cameras.length||!$('login').hidden||!$('choose').hidden;
+ $('rtsp-status').textContent=s.rtsp_error==='port_in_use'?`RTSP 端口 ${s.rtsp_port} 已被其他服务占用，请在桥接配置中改用空闲端口。`:s.rtsp_ready?'RTSP 服务已就绪。':'RTSP 服务正在启动，暂时无法通过 RTSP 播放。';
  $('local-mode').hidden=!localOnly;$('local-empty').hidden=!localOnly||!!s.cameras.length;$('replace').hidden=localOnly;
  if(localOnly){$('login').hidden=true;$('choose').hidden=true;if(!s.cameras.length)$('empty').querySelector('p').textContent='等待本地摄像头配置';}
  else if(!s.cameras.length&&$('choose').hidden)$('login').hidden=false;

@@ -1,5 +1,5 @@
 name: Jiumu Local Bridge
-version: "0.1.0-dev.1"
+version: "0.1.0-dev.2"
 image: ghcr.io/neqq3/jiumu-camera-bridge
 slug: jiumu_bridge
 description: 九目智联 A907-J 局域网音视频桥接，无需 Android 设备
@@ -20,7 +20,7 @@ stage: experimental
 environment:
   HA_INGRESS: "1"
 options:
-  rtsp_port: 18554
+  rtsp_port: 19554
   local_only: false
 schema:
   rtsp_port: port

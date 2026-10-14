@@ -1,7 +1,7 @@
 ARG NODE_BASE=node:24.21.0-bookworm-slim
 FROM ${NODE_BASE}
 ARG MEDIA_READY=0
-ARG BUILD_VERSION=0.1.0-dev.1
+ARG BUILD_VERSION=0.1.0-dev.2
 ARG BUILD_ARCH="amd64|aarch64"
 LABEL io.hass.version="${BUILD_VERSION}" io.hass.type="app" io.hass.arch="${BUILD_ARCH}"
 RUN if [ "$MEDIA_READY" != 1 ]; then \

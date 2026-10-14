@@ -22,6 +22,7 @@ docker run -d --name "$name" --network none --init --read-only \
 docker exec -i "$name" sh -c 'cat > /tmp/install-test.cjs; chmod 644 /tmp/install-test.cjs' < "$root/scripts/container-smoke.cjs"
 timeout --kill-after=3s 30s docker exec "$name" node /tmp/install-test.cjs check
 timeout --kill-after=3s 30s docker exec "$name" node /tmp/install-test.cjs interrupt-rtsp
+timeout --kill-after=3s 30s docker exec "$name" node /tmp/install-test.cjs port-conflict
 docker restart -t 8 "$name" >/dev/null
 docker exec -i "$name" sh -c 'cat > /tmp/install-test.cjs; chmod 644 /tmp/install-test.cjs' < "$root/scripts/container-smoke.cjs"
 timeout --kill-after=3s 30s docker exec "$name" node /tmp/install-test.cjs check

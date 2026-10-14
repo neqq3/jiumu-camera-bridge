@@ -11,7 +11,7 @@
 go2rtc:
   streams:
     my_camera:
-      - "rtsp://viewer:REPLACE_WITH_LOCAL_RTSP_PASSWORD@BRIDGE_HOST:18554/CAMERA_STREAM_ID"
+      - "rtsp://viewer:REPLACE_WITH_LOCAL_RTSP_PASSWORD@BRIDGE_HOST:RTSP_PORT/CAMERA_STREAM_ID"
 cameras:
   my_camera:
     ffmpeg:

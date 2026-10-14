@@ -1,6 +1,6 @@
 services:
   jiumu-bridge:
-    image: ${JIUMU_IMAGE:-ghcr.io/neqq3/jiumu-camera-bridge:0.1.0-dev.1}
+    image: ${JIUMU_IMAGE:-ghcr.io/neqq3/jiumu-camera-bridge:0.1.0-dev.2}
     container_name: jiumu-bridge
     network_mode: host
     restart: unless-stopped

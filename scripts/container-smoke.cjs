@@ -4,6 +4,7 @@
 // This test kills its go2rtc child to verify recovery; never run in production.
 const assert=require('node:assert/strict'),fs=require('node:fs'),crypto=require('node:crypto');
 const {spawnSync}=require('node:child_process');
+const net=require('node:net'),{once}=require('node:events');
 assert.equal(process.env.JIUMU_INSTALL_TEST,'1','Disposable installation test required');
 const interfaces=fs.readdirSync('/sys/class/net').filter(name=>fs.existsSync('/sys/class/net/'+name+'/ifindex'));
 assert.deepEqual(interfaces,['lo'],'No host/LAN network allowed');
@@ -33,6 +34,22 @@ async function main(){
     assert.equal((await ready()).status,503,'RTSP loss must not report ready');
     await waitReady();
     const after=rtspPids();assert.equal(after.length,1);assert.notEqual(after[0],before[0]);
+  }
+  if(step==='port-conflict'){
+    const before=rtspPids();assert.equal(before.length,1);
+    process.kill(before[0],'SIGKILL');
+    for(let n=0;n<50&&rtspPids().includes(before[0]);n++)await delay(20);
+    // Mimic HA Core: an unrelated loopback RTSP server can answer OPTIONS.
+    const owner=net.createServer(socket=>socket.on('data',()=>socket.end('RTSP/1.0 200 OK\r\nCSeq: 1\r\n\r\n')));
+    owner.listen(18554,'127.0.0.1');await once(owner,'listening');
+    try{
+      for(let n=0;n<35;n++){
+        assert.equal((await ready()).status,503,'Another RTSP server is not bridge readiness');
+        await delay(100);
+      }
+      assert.equal(rtspPids().length,0,'Do not launch go2rtc against an occupied RTSP port');
+    }finally{await new Promise(resolve=>owner.close(resolve));}
+    await waitReady();
   }
   const key=fs.readFileSync(data+'/admin-token','utf8').trim();
   const headers={Authorization:'Bearer '+key};
