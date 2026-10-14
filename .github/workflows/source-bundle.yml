@@ -85,6 +85,15 @@ jobs:
           (cd bundle && find . -type f ! -name SHA256SUMS -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS)
           tar -czf "runtime-sources-$VERSION.tar.gz" bundle
           sha256sum "runtime-sources-$VERSION.tar.gz" > runtime-sources.sha256
+      - name: Preserve the collected bundle even if draft upload fails
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: matching-runtime-sources
+          path: |
+            runtime-sources-*.tar.gz
+            runtime-sources.sha256
+          compression-level: 0
+          retention-days: 7
       - name: Save a private draft for review
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
