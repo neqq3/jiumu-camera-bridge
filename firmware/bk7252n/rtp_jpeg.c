@@ -18,7 +18,7 @@ static void put32(uint8_t *p, uint32_t v) { put16(p,v>>16); put16(p+2,v); }
 int jpeg_parse(const uint8_t *p, size_t n, jpeg_view *out)
 {
     size_t pos=2;
-    unsigned quant_mask=0, huff_mask=0, sof=0;
+    unsigned quant_mask=0, huff_mask=0, sof=0, chroma_quant=1;
     if (!p || !out || n<4 || n>JPEG_FRAME_LIMIT || p[0]!=255 || p[1]!=216) return -1;
     memset(out,0,sizeof(*out));
     while (pos+4<=n) {
@@ -54,13 +54,15 @@ int jpeg_parse(const uint8_t *p, size_t n, jpeg_view *out)
             h=be16(d+1); w=be16(d+3);
             if (!w || !h || w>2040 || h>2040 || w%8 || h%8) return -1;
             if (d[6]!=1 || (d[7]!=0x21 && d[7]!=0x22) || d[8]!=0 ||
-                d[9]!=2 || d[10]!=0x11 || d[11]!=1 || d[12]!=3 || d[13]!=0x11 || d[14]!=1) return -1;
+                d[9]!=2 || d[10]!=0x11 || d[11]>1 || d[12]!=3 || d[13]!=0x11 || d[14]!=d[11]) return -1;
+            chroma_quant=d[11];
             out->width8=(uint8_t)(w/8); out->height8=(uint8_t)(h/8);
             out->type=d[7]==0x22 ? 1 : 0; sof=1;
         } else if (marker==0xda) {
             static const uint8_t sos[]={3,1,0,2,0x11,3,0x11,0,63,0};
             size_t end=pos;
-            if (!sof || quant_mask!=3 || huff_mask!=15 || size!=sizeof(sos) || memcmp(d,sos,size)) return -1;
+            if (!sof || !(quant_mask&1) || !(quant_mask&(1u<<chroma_quant)) || huff_mask!=15 || size!=sizeof(sos) || memcmp(d,sos,size)) return -1;
+            if (!chroma_quant) memcpy(out->quant+64,out->quant,64);
             while (end+1<n) {
                 if (p[end]!=255) { ++end; continue; }
                 if (p[end+1]==0) { end+=2; continue; }

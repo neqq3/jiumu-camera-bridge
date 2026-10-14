@@ -1,6 +1,7 @@
 /* SPDX-License-Identifier: Apache-2.0 */
 #include "include.h"
 #include "rtos_pub.h"
+#include "uart_pub.h"
 #include "video_transfer.h"
 #include "rtsp_server.h"
 
