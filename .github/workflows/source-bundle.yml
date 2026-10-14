@@ -34,9 +34,12 @@ jobs:
           printf '%s' "$GH_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
           trap 'docker logout ghcr.io >/dev/null' EXIT
           mkdir -p bundle
+          docker buildx imagetools inspect "$IMAGE" --raw > bundle/runtime-index.json
           for ARCH in arm64 amd64; do
-            docker pull --platform "linux/$ARCH" "$IMAGE"
-            docker tag "$IMAGE" "jiumu-source-input:$ARCH"
+            CHILD=$(jq -er --arg arch "$ARCH" '[.manifests[] | select(.platform.os == "linux" and .platform.architecture == $arch) | .digest] | if length == 1 then .[0] else error("Expected one platform manifest") end' bundle/runtime-index.json)
+            PLATFORM_IMAGE="ghcr.io/$GITHUB_REPOSITORY@$CHILD"
+            docker pull --platform "linux/$ARCH" "$PLATFORM_IMAGE"
+            docker tag "$PLATFORM_IMAGE" "jiumu-source-input:$ARCH"
             ID=$(docker create --platform "linux/$ARCH" "jiumu-source-input:$ARCH")
             docker cp "$ID:/var/lib/dpkg/status" "bundle/dpkg-status-$ARCH"
             docker rm "$ID"
