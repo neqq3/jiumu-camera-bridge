@@ -9,7 +9,18 @@ Docker 与 HAOS 使用同一个多架构镜像，安装主机负责运行，不�
 
 开发版本也可通过 `promote.yml` 填入成功的构建 run ID，直接将已测试的相同镜像摘要标记为源码配置中的 `X.Y.Z-dev.N`。它会核对工作流、提交、完成状态与摘要，不重新构建，不允许覆盖指向其他摘要的已有版本，也不更改仓库或镜像可见性。
 
-当前仓库和镜像保持私有，`0.1.0-dev.1` 是开发候选，不是已公开的稳定版本。流水线成功、镜像存在和下载权限是安装前提。私有镜像需要 GHCR 读取权限，不能把此阶段称为普通用户免认证安装；公开发布后的加载项才适合在商店直接安装。不要将 GitHub 凭据填写到九目账号表单。
+当前仓库和镜像保持私有，`0.1.0-dev.2` 是开发候选，不是已公开的稳定版本。流水线成功、镜像存在和下载权限是安装前提。私有镜像需要 GHCR 读取权限，不能把此阶段称为普通用户免认证安装；公开发布后的加载项才适合在商店直接安装。不要将 GitHub 凭据填写到九目账号表单。
+
+`0.1.0-dev.2` 的[双架构构建](https://github.com/neqq3/jiumu-camera-bridge/actions/runs/38506380010)与[版本标记](https://github.com/neqq3/jiumu-camera-bridge/actions/runs/38507413905)均已成功。两个架构分别通过 4 项安装恢复检查、70 项回归，零失败、零跳过；新增检查覆盖端口被其他服务占用、释放后自动恢复。HAOS 默认 RTSP 端口改为 19554，已有安装请同步修改加载项选项。
+
+```text
+ghcr.io/neqq3/jiumu-camera-bridge:0.1.0-dev.2
+sha256:53632d9b97b4c4ec5ea953a3353ef768cc93e88cb7ee45b21013474f664b9b08
+```
+
+新版[对应源码收集](https://github.com/neqq3/jiumu-camera-bridge/actions/runs/38508032947)也已成功，附件 `runtime-sources-0.1.0-dev.2.tar.gz` 保存在该版本未发布的 Release 草稿中，SHA-256 为 `45edb8c3b6c813cceceba3ebe82fcaef404f519a957c220fad4c688c8cd78275`。收集和存储均在 GitHub 进行，没有在 NAS 或 HAOS 编译。
+
+下面保留首版镜像及其对应源码记录；不同版本的源码材料需与各自镜像匹配，不能用首版材料冒充新版材料。
 
 2026-10-14 已完成[首次双架构构建](https://github.com/neqq3/jiumu-camera-bridge/actions/runs/38441178397)：两个架构分别通过 3 项安装恢复检查及 70 项回归，零失败、零跳过。[开发版发布](https://github.com/neqq3/jiumu-camera-bridge/actions/runs/38442548312)直接沿用这次构建的摘要：
 

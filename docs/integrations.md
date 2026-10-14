@@ -40,6 +40,8 @@ cameras:
 
 只看画面：添加 [Generic Camera](https://www.home-assistant.io/integrations/generic/)，Stream Source 填桥接生成的 RTSP URL，使用 TCP。这里使用本地取流凭据，不使用九目账号。
 
-需要检测与录像：先让 Frigate 获取画面，再安装 [Frigate HA 集成](https://docs.frigate.video/integrations/home-assistant/)，按照该集成文档配置双方共用 MQTT。尚未在本项目测试环境验证 HA 实体创建。
+需要检测与录像：先让 Frigate 获取画面，再安装 [Frigate HA 集成](https://docs.frigate.video/integrations/home-assistant/)，按照该集成文档配置双方共用 MQTT。Frigate HA 集成的事件实体尚未在本项目测试环境验证。
+
+2026-10-14 已在 HA Core 2025.12.2 实际创建 Generic Camera，从 NAS 桥接取得 640×480 视频并下载有效 JPEG。首次打开和快照曾失败，重试后成功，仍存在启动等待；详细范围见[验证记录](validation.md)。已有 NAS 桥接时，HA 可以直接订阅其 RTSP，无需再启动一个加载项连接同一摄像头。独立 HAOS 部署从 `0.1.0-dev.2` 起默认使用 19554；不要与 HA Core 自带 go2rtc 的 18554 冲突。
 
 录像参数保留解复用器的时钟精度，并丢弃恢复时偶尔出现的无时间戳视频包；不会重新编码或修改保留的数据包。请同时更新桥接版本和本摄像头的录像参数。中断仍会留下缺帧，不能把跨越中断的片段时长当作连续画面。
