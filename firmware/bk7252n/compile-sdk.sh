@@ -11,6 +11,8 @@ sha256sum sdk/toolchain/arm-none-eabi-gcc.tar.xz > "$results/toolchain-sha256.tx
 tar -xJf sdk/toolchain/arm-none-eabi-gcc.tar.xz -C sdk/toolchain
 export ARM_GCC_TOOLCHAIN="$root/sdk/toolchain/arm-none-eabi/bin/"
 "${ARM_GCC_TOOLCHAIN}arm-none-eabi-gcc" --version > "$results/compiler-version.txt"
+python3 firmware/bk7252n/prepare-sdk.py
+git -C sdk diff -- application.mk > "$results/standalone-overlay.diff"
 set +e
 (cd sdk && timeout --kill-after=10s 600s make bk7252n -j2) 2>&1 | tee "$results/build.log"
 status=${PIPESTATUS[0]}
@@ -23,6 +25,11 @@ for name in bk7252n bk7231_bsp; do
   fi
   if [ -f "sdk/out/$name.map" ]; then cp "sdk/out/$name.map" "$results/"; fi
 done
+if [ "$status" = 0 ]; then
+  for symbol in video_buffer_open video_buffer_read_frame video_buffer_close camera_intfer_init; do
+    grep -Eq " [Tt] $symbol$" "$results/bk7252n-symbols.txt"
+  done
+fi
 if [ -f sdk/config/sys_config.h ]; then cp sdk/config/sys_config.h "$results/"; fi
 printf '## BK7252N compile-only research\n\nSDK: `%s`\n\nBuild exit: `%s`\n\nNo device access, flashing, deployment, or firmware release. A successful build does not establish A907-J board compatibility.\n' "$expected" "$status" >> "$GITHUB_STEP_SUMMARY"
 # Only text diagnostics are uploaded. No vendor dump, ELF or flashable image.
