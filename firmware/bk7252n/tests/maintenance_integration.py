@@ -199,6 +199,11 @@ def main():
                 raise AssertionError('faulty backup should be truncated')
             except http.client.IncompleteRead:
                 pass
+            interrupted = folder/'interrupted.flash-backup'
+            cli('backup', interrupted, expected=1)
+            assert not interrupted.exists()
+            assert not interrupted.with_name(interrupted.name+'.json').exists()
+            assert interrupted.with_name(interrupted.name+'.partial').exists()
             assert status()['reboot_available'] is False
             assert call('POST', '/v1/reboot', b'')[0] == 503
             checks.append('post-commit storage fault quarantines reboot and reports unavailability')

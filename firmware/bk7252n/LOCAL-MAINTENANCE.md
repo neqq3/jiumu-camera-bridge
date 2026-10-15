@@ -1,5 +1,13 @@
 # Local maintenance and returning to stock
 
+[Actions run 38688617223](https://github.com/neqq3/jiumu-camera-bridge/actions/runs/38688617223)
+passed both the actual SDK build and host tests for commit `fa7b8a3`. It linked
+the real maintenance/Flash implementation, passed 11 HTTP/client integration
+checks plus core/adapter fault tests and eight Python checks. Existing synthetic
+RTSP tests still decoded two sessions of 12 VGA frames each. The image has
+449,864 text bytes, 756 initialized-data bytes and 101,664 BSS bytes; task stacks,
+SDK pools and network/frame buffers additionally consume runtime memory.
+
 This is implemented research code, tested without a camera. It is not a release
 image or permission to flash an A907-J. The installed bootloader/FAL table and a
 working first-migration recovery route have not been obtained. The checked-in
@@ -97,6 +105,20 @@ metadata; resending the same package is not proven to repair damaged app code.
 There is no demonstrated old-app slot or health-based rollback. See
 [the readout investigation](READOUT-AND-SWITCHING.md) and
 [special modes](SPECIAL-MODES-AND-RECOVERY.md).
+
+## Application-image identity
+
+The SDK links both `bk7252n.elf` at zero and `bk7231_bsp.elf` at `0x10000`.
+Only the latter is the preserved-loader application candidate. The SDK initially
+generates raw BSP bytes, preserves them as `bsp.bin`, then replaces the similarly
+named `bk7231_bsp.bin` with CRC-encoded bytes. QIO combines bootloader and app.
+Neither filename similarity nor a successful ELF link makes these interchangeable.
+
+`check_layout.py` verifies both ELF/map origins, the BSP reset branch, a fresh
+objcopy comparison against raw `bsp.bin`, and the reference app budget minus
+96 bytes of metadata. Its report always keeps `safe_to_flash: false`; reference
+layout agreement is not identification of this camera's installed bootloader.
+The workflow publishes only the report and symbols, never these binary files.
 
 ## Development use and tests
 

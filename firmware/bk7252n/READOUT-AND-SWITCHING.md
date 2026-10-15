@@ -159,7 +159,9 @@ statement that today's research image can be flashed.
    can validate and stage the verified original package for the same loader.
    Start maintenance independently of sensor/audio initialization. Isolate
    custom settings so they cannot overwrite stock identity/calibration data.
-   This interface is not yet implemented.
+   The [interface and SDK backend are now implemented and host-tested](LOCAL-MAINTENANCE.md).
+   Device provisioning and the installed boot contract remain unverified; the
+   research board configuration does not enable its listener or writes.
 5. Verify a complete stock → custom → stock → custom cycle on a recovery-ready
    spare under separate flashing authorization. Check cold boot, local access,
    sensor/audio, configuration preservation and the existing video integration.
@@ -177,8 +179,8 @@ It has not been identified as the camera's installed loader.
 
 | Situation | Required behavior | Current evidence |
 | --- | --- | --- |
-| Both applications work | Repeatable local OTA in both directions, preserving original data | Stock download path identified; custom return interface not implemented |
-| Sensor fails but custom app runs | Local maintenance remains usable | Design requirement; not tested on hardware |
+| Both applications work | Repeatable local OTA in both directions, preserving original data | Stock download path identified; custom return interface implemented; actual round trip untested |
+| Sensor fails but custom app runs | Local maintenance remains usable | Separate task implemented; not tested on hardware |
 | HTTP download stops midway | Old app remains bootable; incomplete staging rejected | Application writes staging; actual loader behavior unresolved |
 | Power fails during app copy | Loader can resume or use an intact alternative image | Installed loader required; no power-loss test |
 | Valid image hangs before networking | Independent rescue or bounded trial-boot rollback | Not demonstrated; application watchdog/maintenance cannot guarantee this |

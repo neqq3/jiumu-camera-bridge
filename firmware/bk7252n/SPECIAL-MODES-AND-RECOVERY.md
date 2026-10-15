@@ -117,10 +117,10 @@ change. No documented button combination for this exact model was found.
 | State | Candidate action | Present confidence |
 | --- | --- | --- |
 | Stock app works | Local HTTP image fetched through an existing authenticated OTA control path | Static path established; migration not attempted |
-| Custom app and maintenance networking work | Validate/stage the preserved stock package, then reboot | Design only; return service missing |
+| Custom app and maintenance networking work | Validate/stage the preserved stock package, then explicit commit and reboot | Implemented and host-tested; installed boot contract and hardware round trip still missing |
 | New package download is incomplete | Retain existing app; loader validates staging before copy | Application staging established; installed loader still missing |
 | Power fails while copying | Retry intact staging if the loader supports it | Reference inference only; no power-cut test |
-| Sensor init fails but early maintenance survives | Reach maintenance and reinstall stock | Future design; no hardware proof |
+| Sensor init fails but application maintenance survives | Reach the separate maintenance task and reinstall stock | Separate task implemented; still depends on SDK/RTOS/network startup; no hardware proof |
 | Application fails before networking | Boot-level fallback or independent download interface | No verified no-disassembly route |
 | Loader or partition data are damaged | Independent ROM/SPI recovery with original data | Chip/tool support is not a tested route on this unit |
 
@@ -130,3 +130,31 @@ sent to a camera and no new flashable image was created by this investigation.
 
 See [the readout investigation](READOUT-AND-SWITCHING.md) and
 [OTA package/recovery analysis](OTA-RECOVERY.md) for the existing evidence.
+
+## Additional reference-loader checks used by the implementation
+
+The bounded follow-up at `0x7d20`, `0xa7ac`, `0xa7bc`, `0xaa1c` and `0xa07c`
+establishes more precise limits in the same reference binary:
+
+- `download` metadata is read at offset zero; installed application metadata is
+  read/written at `partition.length - 96`. Raw-size validation must reserve those
+  last 96 logical bytes and must not confuse physical CRC-expanded capacity with
+  logical application capacity.
+- The normal `App_verify` helper delegates to the header-CRC check. Its name is
+  not evidence of a complete application-body checksum on every boot.
+- Equality of the full 96-byte download and installed headers causes a copy to
+  be skipped. Resending an identical package is therefore not a verified repair
+  for an application whose body became corrupt while its header stayed intact.
+
+These are reference-loader findings, not identification of the installed loader.
+The [maintenance implementation](LOCAL-MAINTENANCE.md) keeps the staging header
+erased until complete body verification and a separate commit. It does not
+modify trusted package metadata or corrupt installed metadata to force a copy.
+
+The pinned SDK invokes `user_main()` only after basic Flash initialization,
+extended initialization, calibration and networking. Creating maintenance before
+sensor startup can survive a sensor-open failure, but not these earlier faults.
+Fast-connect writes and MAC setters can persist changes or stop Wi-Fi; the
+maintenance code does not call them or enable fast-connect. Some earlier SDK
+calibration lives in precompiled libraries, so compilation alone cannot prove
+that a first boot would leave all original settings unchanged.
