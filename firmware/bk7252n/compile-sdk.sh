@@ -27,7 +27,7 @@ for name in bk7252n bk7231_bsp; do
   if [ -f "sdk/out/$name.map" ]; then cp "sdk/out/$name.map" "$results/"; fi
 done
 if [ "$status" = 0 ]; then
-  for symbol in video_buffer_open video_buffer_read_frame video_buffer_close camera_intfer_init sp0a39_init_candidate jpeg_parse rtp_jpeg_send research_rtsp_serve user_main; do
+  for symbol in video_buffer_open video_buffer_read_frame video_buffer_close camera_intfer_init sp0a39_init_candidate jpeg_parse rtp_jpeg_send research_rtsp_serve user_main maintenance_http_serve maintenance_sdk_probe maintenance_sdk_accept_contract maintenance_sdk_backup_read maintenance_sdk_reboot maintenance_sdk_serve mc_init mc_begin mc_feed mc_finish mc_commit mc_abort; do
     if ! grep -Eq " [Tt] $symbol$" "$results/bk7252n-symbols.txt"; then
       printf 'Required implementation absent: %s\n' "$symbol" | tee -a "$results/symbol-validation.txt"
       status=1

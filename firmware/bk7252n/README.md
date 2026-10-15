@@ -28,9 +28,13 @@ Buffers are capped at 64 KiB per frame, 2 KiB per request and 1400 bytes per
 packet. Partial requests expire after 5 seconds; writes after 2 seconds; a
 session with no valid fresh frame closes after 5 seconds.
 
-The research entry point waits for SDK initialization and starts the service on
-**loopback only**. It has no Wi-Fi onboarding, user authentication, audio, LAN
-enable switch or OTA endpoint yet. It is not a usable camera replacement.
+The research entry point waits for SDK initialization and starts RTSP on
+**loopback only**. A separate [authenticated local maintenance implementation](LOCAL-MAINTENANCE.md)
+now supports private backup and explicit stock-RBL staging/commit/reboot with an
+independently verified boot contract. The board configuration deliberately supplies
+no token, network settings or trusted contract, so its listener and Flash writes
+remain disabled. Wi-Fi onboarding, RTSP authentication, audio and hardware bring-up
+are still missing. It is not a usable camera replacement.
 No household credentials or cloud endpoints are compiled in. Library code is
 not a packet capture: cloud-free operation on hardware remains untested.
 
@@ -55,3 +59,13 @@ cannot be established without the installed bootloader. `ota_preflight.py`
 inspects a local stock-format RBL file without any device connection; passing
 its format checks always leaves `safe_to_flash` false. No firmware image or
 flasher is distributed by this workflow.
+
+[Read-only backup and reversible migration](READOUT-AND-SWITCHING.md) records
+which apparent backup interfaces were ruled out, the UART console evidence,
+and the requirements for returning to stock without opening the enclosure.
+The installed bootloader and a recovery path for an early crash are still missing.
+
+[Special modes and recovery](SPECIAL-MODES-AND-RECOVERY.md) follows the stock
+button handlers, the OTA version/acknowledgement behavior and the reference
+loader's error fallback. Configuration reset and an OTA status report are not
+boot-level recovery mechanisms.

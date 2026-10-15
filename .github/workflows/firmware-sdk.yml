@@ -23,7 +23,7 @@ jobs:
           persist-credentials: false
       - name: Install FFmpeg if absent
         run: command -v ffmpeg || (sudo apt-get update && sudo apt-get install -y ffmpeg)
-      - name: Test sensor adapter and native RTSP on loopback
+      - name: Test sensor, RTSP and authenticated maintenance without hardware
         run: bash firmware/bk7252n/test-host.sh
       - name: Keep text-only test evidence
         if: always()

@@ -1,5 +1,25 @@
 # Network OTA and failure recovery
 
+Implementation update: [local maintenance and stock return](LOCAL-MAINTENANCE.md)
+now has a real SDK backend, authenticated HTTP interface and host fault tests.
+It requires an independently established installed-loader contract and does not
+enable Flash writes in the checked-in research board configuration. It does not
+change the unverified first-backup and early-crash recovery boundaries below.
+
+Latest offline follow-up, 2026-10-15:
+[special modes, version checks and error fallback](SPECIAL-MODES-AND-RECOVERY.md).
+In the reference loader, `ota_main` returning an error leads its caller to
+attempt logical `0x10000`, not to restore a separate factory image. The installed
+loader remains unidentified. Stock key handling resets settings, while the
+reviewed `isOtaFlag` path reports an update result to the server.
+
+Follow-up 2026-10-15: [read-only readout and bidirectional switching](READOUT-AND-SWITCHING.md)
+tracks the installed-loader search. A real `fal read` shell primitive is present,
+but an external network or USB transport has not been demonstrated. The APP's apparent
+download command is an OTA writer, not a backup interface. The initial analysis
+was offline; the follow-up separately records bounded status-only requests.
+No upgrade, flash, restart or configuration change was made.
+
 Updated 2026-10-14. No camera, router, NAS, Android device or Frigate instance
 was accessed for this investigation. It uses the already held original
 application and a separately identified public SDK reference. Standalone
@@ -33,8 +53,12 @@ The original FAL initializer at **0x63dfc** searches backward from logical
 **0xF000** in `beken_onchip_crc` for magic **0x45503130**, then reads 64-byte
 partition records into RAM. The application therefore obtains its partition
 table from the earlier boot region. Our decoded OTA application starts at
-**0x10000** and does not include that region. There is no complete partition
-table to recover from this application alone.
+**0x10000** and does not include that region. The **installed FAL table** cannot
+be recovered from this application alone. A separate, compiled legacy SDK
+partition table has now been extracted from the application at `0xf94d8`:
+see [its layout and limits](READOUT-AND-SWITCHING.md#compiled-sdk-layout-is-not-the-installed-fal-table).
+That table is useful corroboration but does not contain the bootloader or
+identify the FAL table that the installed bootloader actually provides.
 
 The known original RBL is 659,424 bytes; its decoded application is 1,111,392
 bytes. Its format is **0x402 (AES256-CBC plus LZMA)**. Header and packaged-body
@@ -82,7 +106,7 @@ projects cannot supply that missing identity merely by sharing a product name.
 | Corrupt or truncated package | Original application checks header/body integrity; offline preflight rejects all tested truncations and byte corruption | No physical power-cut test performed |
 | Power lost while bootloader copies/decompresses | Application code cannot answer this | Check whether staging survives and copy can restart after a partial app overwrite |
 | Image is valid but cannot boot | CRC/FNV will not detect wrong pins, broken Wi-Fi or application hangs | A verified trial/rollback or separate rescue path; watchdog reset alone is insufficient |
-| App boots but camera fails | A future firmware could expose local maintenance before initializing camera | Persistent rescue configuration and watchdog/error behavior are not implemented yet |
+| App boots but camera fails | Separate maintenance task and authenticated return-to-stock interface are implemented | Board provisioning, hardware startup and recovery remain untested |
 | Bootloader damaged | Current network candidate is app-only | Preserve bootloader/calibration; UART/SPI recovery may require enclosure access |
 
 The original SD upgrade scanner runs in the main application. It is useful

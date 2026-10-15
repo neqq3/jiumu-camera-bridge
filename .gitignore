@@ -31,4 +31,8 @@ private-*
 *.pyc
 bridge.json
 admin-token
+maintenance-token
+*.flash-backup
+*.flash-backup.json
+*.partial
 go2rtc.yaml

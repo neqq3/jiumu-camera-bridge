@@ -4,6 +4,7 @@
 #include "uart_pub.h"
 #include "video_transfer.h"
 #include "rtsp_server.h"
+#include "maintenance_sdk.h"
 
 static size_t camera_frame(void *ctx, uint8_t *buffer, size_t capacity)
 {
@@ -22,14 +23,19 @@ static size_t camera_frame(void *ctx, uint8_t *buffer, size_t capacity)
 static void rtsp_task(void *arg)
 {
     (void)arg;
-    /* Deliberately loopback until board and authentication gates are met.
-     * No Wi-Fi credentials, cloud endpoints, OTA client or flash writer here. */
+    /* Deliberately loopback until board and authentication gates are met. */
     research_rtsp_serve("127.0.0.1",8554,camera_frame,NULL);
     rtos_delete_thread(NULL);
 }
 void user_main(void)
 {
     /* SDK invokes this after extended_app_waiting_for_launch(). */
+    /* Maintenance has its own task and starts before any sensor access.
+     * A sensor-open failure must not prevent a configured maintenance server.
+     * In the pinned SDK, smaller priorities run first (4 is above RTSP's 5).
+     * This cannot recover faults before SDK startup or the scheduler. */
+    if (rtos_create_thread(NULL,4,"maintenance",maintenance_sdk_task,8192,NULL)!=0)
+        os_printf("maintenance task creation failed\r\n");
     if (rtos_create_thread(NULL,5,"native_rtsp",rtsp_task,8192,NULL)!=0)
         os_printf("native RTSP task creation failed\r\n");
 }
